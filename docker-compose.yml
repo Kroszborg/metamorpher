@@ -1,6 +1,6 @@
 services:
-  fileflex:
-    container_name: fileflex
+  MetaMorpher:
+    container_name: MetaMorpher
     build: .
     ports:
       - 3000:3000

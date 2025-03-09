@@ -18,18 +18,6 @@ export default function Navbar({}): any {
       </Link>
       <div className="items-center hidden gap-2 md:flex">
         <ModeToggle />
-        <Link href="https://github.com/thegr8binil/FileFlex.git">
-          <Button
-            variant="default"
-            className="items-center hidden gap-2 rounded-full bg-primary w-fit md:flex"
-            size="lg"
-          >
-            <span>Github Repo</span>
-            <span className="text-xl">
-              <BsGithub />
-            </span>
-          </Button>
-        </Link>
       </div>
       <div className="block p-3 md:hidden ">
         <ModeToggle />
