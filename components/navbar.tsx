@@ -1,20 +1,23 @@
-import Image from "next/image";
-import { Button } from "./ui/button";
 import Link from "next/link";
-import { BsGithub } from "react-icons/bs";
 import { ModeToggle } from "./mode-toggle";
+import { Sparkles } from "lucide-react";
 
-export default function Navbar({}): any {
+export default function Navbar() {
   return (
-    <nav className="fixed z-50 flex items-center justify-between w-full h-24 px-4 py-10 backdrop-blur-md bg-background bg-opacity-30 md:px-8 lg:px-12 xl:px-16 2xl:px-24">
-    
-      <a href="/" className="text-xl font-bold">Metamorpher</a>
-    
-      <div className="items-center hidden gap-2 md:flex">
-        <ModeToggle />
-      </div>
-      <div className="block p-3 md:hidden ">
-        <ModeToggle />
+    <nav className="fixed z-50 w-full backdrop-blur-md bg-background/70 border-b border-border/40">
+      <div className="container flex items-center justify-between h-16 px-4 mx-auto max-w-7xl md:px-8 lg:px-12">
+        <Link href="/" className="flex items-center gap-2 text-xl font-bold">
+          <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/70">
+            MetaMorpher
+          </span>
+        </Link>
+        
+        <div className="flex items-center gap-6">
+          
+          <div className="flex items-center">
+            <ModeToggle />
+          </div>
+        </div>
       </div>
     </nav>
   );
