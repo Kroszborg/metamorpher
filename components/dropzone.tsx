@@ -385,7 +385,7 @@ export default function Dropzone() {
                 </Button>
               ) : (
                 <button
-                  title="close"
+                  title="Delete"
                   onClick={() => deleteAction(action)}
                   className="flex items-center justify-center w-8 h-8 text-sm rounded-full hover:bg-muted text-foreground/60 hover:text-foreground transition-colors"
                 >
