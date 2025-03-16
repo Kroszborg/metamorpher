@@ -75,7 +75,8 @@ export default function Dropzone() {
   const [is_done, setIsDone] = useState<boolean>(false);
   const ffmpegRef = useRef<any>(null);
   const [defaultValues, setDefaultValues] = useState<string>("video");
-  const [selcted, setSelected] = useState<string>("...");
+  const [selected, setSelected] = useState<string>("...");
+  const [selectionMap, setSelectionMap] = useState<Record<string, string>>({});
   const accepted_files = {
     "image/*": [
       ".jpg",
@@ -94,81 +95,222 @@ export default function Dropzone() {
     "video/*": [],
   };
 
-  // functions
+  // Reset function - clear all state
   const reset = () => {
     setIsDone(false);
     setActions([]);
     setFiles([]);
     setIsReady(false);
     setIsConverting(false);
+    setSelected("...");
+    setSelectionMap({});
   };
-  const downloadAll = (): void => {
-    for (let action of actions) {
-      !action.is_error && download(action);
+
+  // Fixed download file function
+  const downloadFile = (action: Action) => {
+    if (!action.url || !action.output) {
+      console.error("Missing URL or output for download", action);
+      toast({
+        variant: "destructive",
+        title: "Download Error",
+        description: "File information is incomplete for download",
+        duration: 3000,
+      });
+      return;
+    }
+
+    try {
+      // Create a new anchor element
+      const a = document.createElement("a");
+      a.href = action.url;
+      a.download = action.output;
+      a.style.display = "none";
+
+      // Add to document, click, and cleanup
+      document.body.appendChild(a);
+      a.click();
+
+      // Small delay before cleanup to ensure download begins
+      setTimeout(() => {
+        document.body.removeChild(a);
+      }, 100);
+    } catch (error) {
+      console.error("Download failed:", error);
+      toast({
+        variant: "destructive",
+        title: "Download Failed",
+        description: "Could not download the file. Please try again.",
+        duration: 3000,
+      });
     }
   };
-  const download = (action: Action) => {
-    const a = document.createElement("a");
-    a.style.display = "none";
-    a.href = action.url;
-    a.download = action.output;
 
-    document.body.appendChild(a);
-    a.click();
+  // Fixed download all function
+  const downloadAll = () => {
+    const successfulActions = actions.filter(
+      (action) =>
+        action.is_converted && !action.is_error && action.url && action.output
+    );
 
-    // Clean up after download
-    URL.revokeObjectURL(action.url);
-    document.body.removeChild(a);
+    if (successfulActions.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "No Files to Download",
+        description: "There are no successfully converted files to download.",
+        duration: 3000,
+      });
+      return;
+    }
+
+    // Download each file with a slight delay between them
+    successfulActions.forEach((action, index) => {
+      setTimeout(() => {
+        downloadFile(action);
+      }, index * 800); // Stagger downloads by 800ms
+    });
+
+    toast({
+      title: "Downloads Started",
+      description: `Started downloading ${successfulActions.length} file(s)`,
+      duration: 3000,
+    });
   };
-  const convert = async (): Promise<any> => {
-    let tmp_actions = actions.map((elt) => ({
-      ...elt,
-      is_converting: true,
-    }));
-    setActions(tmp_actions);
-    setIsConverting(true);
-    for (let action of tmp_actions) {
-      try {
-        const { url, output } = await convertFile(ffmpegRef.current, action);
-        tmp_actions = tmp_actions.map((elt) =>
-          elt === action
-            ? {
-                ...elt,
-                is_converted: true,
-                is_converting: false,
-                url,
-                output,
-              }
-            : elt
-        );
-        setActions(tmp_actions);
-      } catch (err) {
-        tmp_actions = tmp_actions.map((elt) =>
-          elt === action
-            ? {
-                ...elt,
-                is_converted: false,
-                is_converting: false,
-                is_error: true,
-              }
-            : elt
-        );
-        setActions(tmp_actions);
+
+  // Fixed convert function
+  const convert = async () => {
+    // Prevent conversion if not ready or already converting
+    if (!is_ready || is_converting) {
+      return;
+    }
+
+    try {
+      // Check if FFmpeg is loaded
+      if (!ffmpegRef.current) {
+        toast({
+          variant: "destructive",
+          title: "Conversion Error",
+          description:
+            "The conversion engine is not loaded yet. Please wait or refresh the page.",
+          duration: 3000,
+        });
+        return;
       }
+
+      // Mark all actions as converting
+      const updatedActions = actions.map((action) => ({
+        ...action,
+        is_converting: true,
+        is_converted: false,
+        is_error: false,
+      }));
+
+      setActions(updatedActions);
+      setIsConverting(true);
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      // Process each file sequentially
+      for (let i = 0; i < updatedActions.length; i++) {
+        try {
+          const result = await convertFile(
+            ffmpegRef.current,
+            updatedActions[i]
+          );
+
+          // Update this specific action as converted
+          updatedActions[i] = {
+            ...updatedActions[i],
+            is_converting: false,
+            is_converted: true,
+            url: result.url,
+            output: result.output,
+          };
+
+          // Update state to show progress
+          setActions([...updatedActions]);
+          successCount++;
+        } catch (error) {
+          console.error(
+            `Error converting file ${updatedActions[i].file_name}:`,
+            error
+          );
+
+          // Mark this specific action as having an error
+          updatedActions[i] = {
+            ...updatedActions[i],
+            is_converting: false,
+            is_converted: false,
+            is_error: true,
+          };
+
+          // Update state to show the error
+          setActions([...updatedActions]);
+          errorCount++;
+        }
+      }
+
+      // All files processed, update final state
+      setIsConverting(false);
+      setIsDone(true);
+
+      // Show appropriate toast message
+      if (errorCount === 0) {
+        toast({
+          title: "Conversion Complete",
+          description: `Successfully converted ${successCount} file(s)`,
+          duration: 3000,
+        });
+      } else if (successCount === 0) {
+        toast({
+          variant: "destructive",
+          title: "Conversion Failed",
+          description: `All ${errorCount} file(s) failed to convert`,
+          duration: 3000,
+        });
+      } else {
+        toast({
+          variant: "default",
+          title: "Conversion Partially Complete",
+          description: `${successCount} file(s) converted, ${errorCount} file(s) failed`,
+          duration: 3000,
+        });
+      }
+    } catch (error) {
+      // Handle any unexpected errors
+      console.error("Unexpected conversion error:", error);
+      setIsConverting(false);
+
+      toast({
+        variant: "destructive",
+        title: "Conversion Error",
+        description: "An unexpected error occurred during conversion",
+        duration: 3000,
+      });
     }
-    setIsDone(true);
-    setIsConverting(false);
   };
+
   const handleUpload = (data: Array<any>): void => {
     handleExitHover();
     setFiles(data);
     const tmp: Action[] = [];
+
+    // Reset previous state
+    setActions([]);
+    setSelectionMap({});
+    setSelected("...");
+    setIsDone(false);
+
+    // Process each uploaded file
     data.forEach((file: any) => {
-      const formData = new FormData();
+      const fileExtension = file.name.slice(
+        ((file.name.lastIndexOf(".") - 1) >>> 0) + 2
+      );
+
       tmp.push({
         file_name: file.name,
         file_size: file.size,
-        from: file.name.slice(((file.name.lastIndexOf(".") - 1) >>> 0) + 2),
+        from: fileExtension,
         to: null,
         file_type: file.type,
         file,
@@ -177,11 +319,22 @@ export default function Dropzone() {
         is_error: false,
       });
     });
+
     setActions(tmp);
   };
+
   const handleHover = (): void => setIsHover(true);
   const handleExitHover = (): void => setIsHover(false);
+
+  // Update action with selected format
   const updateAction = (file_name: String, to: String) => {
+    // Update the selection map to keep track of selections per file
+    setSelectionMap((prev) => ({
+      ...prev,
+      [file_name.toString()]: to.toString(),
+    }));
+
+    // Update the action with the selected format
     setActions(
       actions.map((action): Action => {
         if (action.file_name === file_name) {
@@ -190,11 +343,12 @@ export default function Dropzone() {
             to,
           };
         }
-
         return action;
       })
     );
   };
+
+  // Check if all files have a selected output format
   const checkIsReady = (): void => {
     let tmp_is_ready = true;
     actions.forEach((action: Action) => {
@@ -202,27 +356,56 @@ export default function Dropzone() {
     });
     setIsReady(tmp_is_ready);
   };
+
+  // Remove a file from the list
   const deleteAction = (action: Action): void => {
+    // Remove from actions array
     setActions(actions.filter((elt) => elt !== action));
+
+    // Remove from files array
     setFiles(files.filter((elt) => elt.name !== action.file_name));
+
+    // Remove from selection map
+    const newSelectionMap = { ...selectionMap };
+    delete newSelectionMap[action.file_name];
+    setSelectionMap(newSelectionMap);
   };
+
+  // Effect to check if all files have formats selected
   useEffect(() => {
     if (!actions.length) {
       setIsDone(false);
       setFiles([]);
       setIsReady(false);
       setIsConverting(false);
-    } else checkIsReady();
+    } else {
+      checkIsReady();
+    }
   }, [actions]);
-  useEffect(() => {
-    load();
-  }, []);
-  const load = async () => {
-    const ffmpeg_response: FFmpeg = await loadFfmpeg();
-    ffmpegRef.current = ffmpeg_response;
-    setIsLoaded(true);
-  };
 
+  // Load FFmpeg on component mount
+  useEffect(() => {
+    const loadFFmpeg = async () => {
+      try {
+        const ffmpeg_response = await loadFfmpeg();
+        ffmpegRef.current = ffmpeg_response;
+        setIsLoaded(true);
+      } catch (error) {
+        console.error("Failed to load FFmpeg:", error);
+        setIsLoaded(false);
+        toast({
+          variant: "destructive",
+          title: "Failed to Load Conversion Engine",
+          description: "Please refresh the page and try again.",
+          duration: 5000,
+        });
+      }
+    };
+
+    loadFFmpeg();
+  }, []);
+
+  // Render files list and actions if files are added
   if (actions.length) {
     return (
       <div className="space-y-6">
@@ -230,7 +413,7 @@ export default function Dropzone() {
           {actions.map((action: Action, i: any) => (
             <div
               key={i}
-              className="relative flex flex-wrap items-center justify-between w-full px-4 py-3 my-2 space-y-2 bg-card border-0 shadow-sm cursor-pointer lg:py-2 rounded-lg lg:flex-nowrap"
+              className="relative flex flex-wrap items-center justify-between w-full px-4 py-3 my-2 space-y-2 bg-card border-0 shadow-sm lg:py-2 rounded-lg lg:flex-nowrap"
             >
               {!is_loaded && (
                 <Skeleton className="absolute w-full h-full -ml-10 cursor-progress rounded-xl" />
@@ -285,10 +468,9 @@ export default function Dropzone() {
                       } else if (extensions.video.includes(value)) {
                         setDefaultValues("video");
                       }
-                      setSelected(value);
                       updateAction(action.file_name, value);
                     }}
-                    value={selcted}
+                    value={selectionMap[action.file_name] || selected}
                   >
                     <SelectTrigger className="w-24 h-8 text-xs font-medium text-center outline-none focus:outline-none focus:ring-0 text-foreground bg-secondary/50 border-0">
                       <SelectValue placeholder="..." />
@@ -377,7 +559,7 @@ export default function Dropzone() {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => download(action)}
+                  onClick={() => downloadFile(action)}
                   className="flex items-center gap-1 text-xs h-8 px-2 text-foreground/80 hover:text-foreground"
                 >
                   <HiOutlineDownload className="w-4 h-4" />
@@ -386,6 +568,7 @@ export default function Dropzone() {
               ) : (
                 <button
                   title="Delete"
+                  type="button"
                   onClick={() => deleteAction(action)}
                   className="flex items-center justify-center w-8 h-8 text-sm rounded-full hover:bg-muted text-foreground/60 hover:text-foreground transition-colors"
                 >
@@ -400,15 +583,17 @@ export default function Dropzone() {
             <div className="space-y-3 w-fit">
               <Button
                 size="lg"
+                type="button"
                 className="relative flex items-center w-full gap-2 py-4 font-medium bg-primary hover:bg-primary/90 rounded-xl text-sm"
-                onClick={downloadAll}
+                onClick={() => downloadAll()}
               >
                 {actions.length > 1 ? "Download All Files" : "Download File"}
                 <HiOutlineDownload />
               </Button>
               <Button
                 size="lg"
-                onClick={reset}
+                type="button"
+                onClick={() => reset()}
                 variant="outline"
                 className="w-full text-sm rounded-xl"
               >
@@ -418,9 +603,10 @@ export default function Dropzone() {
           ) : (
             <Button
               size="lg"
-              disabled={!is_ready || is_converting}
+              type="button"
+              disabled={!is_ready || is_converting || !is_loaded}
               className="relative flex items-center py-4 font-medium rounded-xl text-sm w-44 bg-primary hover:bg-primary/90"
-              onClick={convert}
+              onClick={() => convert()}
             >
               {is_converting ? (
                 <span className="flex items-center gap-2">
@@ -437,6 +623,7 @@ export default function Dropzone() {
     );
   }
 
+  // Render the dropzone if no files are present
   return (
     <ReactDropzone
       onDrop={handleUpload}
