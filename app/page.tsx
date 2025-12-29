@@ -1,6 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import Dropzone from "@/components/dropzone";
+import ImagesToPdf from "@/components/images-to-pdf";
 import { Check, Zap, RefreshCw, FileIcon, ArrowDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import AboutMeSection from "@/components/about-me-section";
 
 export default function Home() {
@@ -71,7 +76,7 @@ export default function Home() {
                     Any Format
                   </h3>
                   <p className="text-sm text-center text-muted-foreground">
-                    Support for all major image, audio, and video formats
+                    Images, audio, video, PDFs - plus create PDFs from images
                   </p>
                 </div>
               </div>
@@ -86,7 +91,7 @@ export default function Home() {
                   </div>
                   <h2 className="text-2xl font-bold">Start Converting Now</h2>
                   <p className="text-muted-foreground mt-2 max-w-md">
-                    Drop your files below and select your desired output format
+                    Convert files between formats or create PDFs from images
                   </p>
                   <div className="mt-4 animate-bounce">
                     <ArrowDown className="w-5 h-5 text-primary" />
@@ -94,9 +99,22 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Dropzone with slightly larger container */}
+              {/* Tabs for different converters */}
               <div className="max-w-4xl mx-auto">
-                <Dropzone />
+                <Tabs defaultValue="convert" className="w-full">
+                  <TabsList className="grid w-full grid-cols-2 mb-8">
+                    <TabsTrigger value="convert">File Converter</TabsTrigger>
+                    <TabsTrigger value="images-to-pdf">Images to PDF</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="convert" className="mt-0">
+                    <Dropzone />
+                  </TabsContent>
+
+                  <TabsContent value="images-to-pdf" className="mt-0">
+                    <ImagesToPdf />
+                  </TabsContent>
+                </Tabs>
               </div>
             </div>
           </div>

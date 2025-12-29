@@ -1,6 +1,0 @@
-services:
-  MetaMorpher:
-    container_name: MetaMorpher
-    build: .
-    ports:
-      - 3000:3000

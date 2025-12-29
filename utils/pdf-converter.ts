@@ -111,17 +111,21 @@ export async function pdfToImages(
   format: "png" | "jpeg" = "png",
   scale = 2
 ): Promise<Blob[]> {
-  // Dynamically import PDF.js
-  const pdfjsLib = await import("pdfjs-dist");
+  try {
+    // Dynamically import PDF.js
+    const pdfjsLib = await import("pdfjs-dist");
 
-  // Configure PDF.js worker
-  const pdfjsVersion = pdfjsLib.version;
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsVersion}/pdf.worker.min.js`;
+    // Configure PDF.js worker - use a more reliable CDN
+    if (typeof window !== "undefined") {
+      const pdfjsVersion = pdfjsLib.version || "4.0.379";
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsVersion}/build/pdf.worker.min.mjs`;
+    }
 
-  const arrayBuffer = await pdfFile.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const arrayBuffer = await pdfFile.arrayBuffer();
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
 
-  const images: Blob[] = [];
+    const images: Blob[] = [];
 
   // Process each page
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -161,6 +165,10 @@ export async function pdfToImages(
   }
 
   return images;
+  } catch (error) {
+    console.error("PDF to images conversion error:", error);
+    throw new Error(`Failed to convert PDF to images: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 // Helper function to read file as data URL

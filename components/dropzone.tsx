@@ -60,9 +60,15 @@ const extensions = {
     "264",
     "hevc",
     "265",
+    "gif",
   ],
   audio: ["mp3", "wav", "ogg", "aac", "wma", "flac", "m4a"],
   pdf: ["png", "jpg", "jpeg"],
+  document: ["pdf", "html"],
+  markdown: ["pdf", "html"],
+  text: ["pdf"],
+  docx: ["pdf", "html", "md"],
+  html: ["pdf"],
 };
 
 export default function Dropzone() {
@@ -93,8 +99,12 @@ export default function Dropzone() {
       ".tga",
     ],
     "audio/*": [],
-    "video/*": [],
+    "video/*": [".gif"],
     "application/pdf": [".pdf"],
+    "text/plain": [".txt"],
+    "text/markdown": [".md", ".markdown"],
+    "text/html": [".html", ".htm"],
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
   };
 
   // Reset function - clear all state
@@ -329,11 +339,11 @@ export default function Dropzone() {
   const handleExitHover = (): void => setIsHover(false);
 
   // Update action with selected format
-  const updateAction = (file_name: String, to: String) => {
+  const updateAction = (file_name: string, to: string) => {
     // Update the selection map to keep track of selections per file
     setSelectionMap((prev) => ({
       ...prev,
-      [file_name.toString()]: to.toString(),
+      [file_name]: to,
     }));
 
     // Update the action with the selected format
@@ -507,6 +517,12 @@ export default function Dropzone() {
                             >
                               Audio
                             </TabsTrigger>
+                            <TabsTrigger
+                              value="image"
+                              className="w-full text-xs"
+                            >
+                              Image
+                            </TabsTrigger>
                           </TabsList>
                           <TabsContent value="video">
                             <div className="grid grid-cols-3 gap-1 w-fit">
@@ -525,6 +541,20 @@ export default function Dropzone() {
                           <TabsContent value="audio">
                             <div className="grid grid-cols-3 gap-1 w-fit">
                               {extensions.audio.map((elt, i) => (
+                                <div key={i} className="col-span-1 text-center">
+                                  <SelectItem
+                                    value={elt}
+                                    className="mx-auto text-xs"
+                                  >
+                                    {elt}
+                                  </SelectItem>
+                                </div>
+                              ))}
+                            </div>
+                          </TabsContent>
+                          <TabsContent value="image">
+                            <div className="grid grid-cols-3 gap-1 w-fit">
+                              {extensions.image.map((elt, i) => (
                                 <div key={i} className="col-span-1 text-center">
                                   <SelectItem
                                     value={elt}
@@ -555,6 +585,62 @@ export default function Dropzone() {
                       {action.file_type.includes("pdf") && (
                         <div className="grid grid-cols-2 gap-1 w-fit">
                           {extensions.pdf.map((elt, i) => (
+                            <div key={i} className="col-span-1 text-center">
+                              <SelectItem
+                                value={elt}
+                                className="mx-auto text-xs"
+                              >
+                                {elt}
+                              </SelectItem>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {action.file_type.includes("markdown") && (
+                        <div className="grid grid-cols-2 gap-1 w-fit">
+                          {extensions.markdown.map((elt, i) => (
+                            <div key={i} className="col-span-1 text-center">
+                              <SelectItem
+                                value={elt}
+                                className="mx-auto text-xs"
+                              >
+                                {elt}
+                              </SelectItem>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {action.file_type.includes("plain") && (
+                        <div className="grid grid-cols-2 gap-1 w-fit">
+                          {extensions.text.map((elt, i) => (
+                            <div key={i} className="col-span-1 text-center">
+                              <SelectItem
+                                value={elt}
+                                className="mx-auto text-xs"
+                              >
+                                {elt}
+                              </SelectItem>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {action.file_type.includes("wordprocessingml") && (
+                        <div className="grid grid-cols-2 gap-1 w-fit">
+                          {extensions.docx.map((elt, i) => (
+                            <div key={i} className="col-span-1 text-center">
+                              <SelectItem
+                                value={elt}
+                                className="mx-auto text-xs"
+                              >
+                                {elt}
+                              </SelectItem>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {action.file_type.includes("html") && (
+                        <div className="grid grid-cols-2 gap-1 w-fit">
+                          {extensions.html.map((elt, i) => (
                             <div key={i} className="col-span-1 text-center">
                               <SelectItem
                                 value={elt}
