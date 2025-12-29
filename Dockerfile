@@ -2,26 +2,25 @@ FROM node:18 AS build
 
 WORKDIR /app
 
-
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 
-RUN yarn build
+RUN npm run build
 
 FROM node:18 AS production
 
 WORKDIR /app
 
-COPY --from=build /app/package.json /app/yarn.lock ./
+COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/.next ./.next
 COPY --from=build /app/public ./public
 
-RUN yarn install --production --frozen-lockfile
+RUN npm ci --production
 
 ENV NODE_ENV=production
 
 EXPOSE 3000
 
-CMD ["yarn", "start"]
+CMD ["npm", "start"]

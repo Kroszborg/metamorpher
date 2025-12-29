@@ -24,7 +24,7 @@ export default function AboutMeSection() {
               <div className="flex flex-col space-y-6">
                 <div>
                   <h3 className="text-xl font-semibold mb-1">
-                    Hi there! I'm Abhiman Panwar aka Kroszborg
+                    Hi there! I&apos;m Abhiman Panwar aka Kroszborg
                   </h3>
                   <p className="text-sm text-muted-foreground">
                     Developer & Privacy Advocate
@@ -32,7 +32,7 @@ export default function AboutMeSection() {
                 </div>
 
                 <p className="text-foreground/90 leading-relaxed">
-                  I'm passionate about creating useful tools that respect user
+                  I&apos;m passionate about creating useful tools that respect user
                   privacy. MetaMorpher was built with a simple goal: to provide
                   a completely free and unlimited file conversion tool that
                   works directly in your browser—no uploads, no restrictions, no

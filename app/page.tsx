@@ -1,12 +1,7 @@
 import Dropzone from "@/components/dropzone";
 import { Check, Zap, RefreshCw, FileIcon, ArrowDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import DonationFooter from "@/components/donation-footer";
 import AboutMeSection from "@/components/about-me-section";
-
-// Your Pocketsflow product page URL
-const POCKETSFLOW_URL =
-  "https://kroszborg.pocketsflow.com/67d4fe92572eabaecbbe1027";
 
 export default function Home() {
   return (
@@ -110,9 +105,6 @@ export default function Home() {
 
       {/* About Me Section */}
       <AboutMeSection />
-
-      {/* Donation Footer */}
-      <DonationFooter pocketsflowUrl={POCKETSFLOW_URL} />
     </>
   );
 }

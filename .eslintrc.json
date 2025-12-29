@@ -1,14 +1,12 @@
 {
   "extends": [
-    "next/core-web-vitals",
-    "airbnb",
-    "airbnb-typescript"
+    "next/core-web-vitals"
   ],
   "parserOptions": {
     "project": "./tsconfig.json"
   },
   "rules": {
     "semi": 0,
-    "no-extra-semi": ["error", "never"]
+    "no-extra-semi": "error"
   }
 }

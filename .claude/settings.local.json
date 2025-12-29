@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\projects\\metamorpher\" /b)",
+      "Bash(test:*)",
+      "Bash(npm outdated:*)",
+      "Bash(cat:*)",
+      "Bash(npm install:*)",
+      "Bash(npm audit:*)",
+      "Bash(npm run build:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

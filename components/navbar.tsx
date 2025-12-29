@@ -3,13 +3,8 @@
 import Link from "next/link";
 import { ModeToggle } from "./mode-toggle";
 import { Sparkles, User, Github, Menu, X } from "lucide-react";
-import DonationButton from "./donation-button";
 import { useState } from "react";
 import { Button } from "./ui/button";
-
-// Your Pocketsflow product page URL
-const POCKETSFLOW_URL =
-  "https://kroszborg.pocketsflow.com/67d4fe92572eabaecbbe1027";
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -42,7 +37,6 @@ export default function Navbar() {
               <User className="w-4 h-4" />
               <span>Portfolio</span>
             </Link>
-            <DonationButton pocketsflowUrl={POCKETSFLOW_URL} />
           </div>
 
           <ModeToggle />
@@ -80,9 +74,6 @@ export default function Navbar() {
               <User className="w-4 h-4" />
               <span>My Portfolio</span>
             </Link>
-            <div className="py-2 px-2">
-              <DonationButton pocketsflowUrl={POCKETSFLOW_URL} />
-            </div>
           </div>
         </div>
       )}

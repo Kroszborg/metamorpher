@@ -62,6 +62,7 @@ const extensions = {
     "265",
   ],
   audio: ["mp3", "wav", "ogg", "aac", "wma", "flac", "m4a"],
+  pdf: ["png", "jpg", "jpeg"],
 };
 
 export default function Dropzone() {
@@ -93,6 +94,7 @@ export default function Dropzone() {
     ],
     "audio/*": [],
     "video/*": [],
+    "application/pdf": [".pdf"],
   };
 
   // Reset function - clear all state
@@ -550,6 +552,20 @@ export default function Dropzone() {
                           ))}
                         </div>
                       )}
+                      {action.file_type.includes("pdf") && (
+                        <div className="grid grid-cols-2 gap-1 w-fit">
+                          {extensions.pdf.map((elt, i) => (
+                            <div key={i} className="col-span-1 text-center">
+                              <SelectItem
+                                value={elt}
+                                className="mx-auto text-xs"
+                              >
+                                {elt}
+                              </SelectItem>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -685,7 +701,7 @@ export default function Dropzone() {
                     Or click to browse your device
                   </p>
                   <p className="mt-6 px-10 text-xs text-muted-foreground">
-                    Supports images, audio, and videos in all major formats
+                    Supports images, audio, videos, and PDFs in all major formats
                   </p>
                 </div>
               </>
