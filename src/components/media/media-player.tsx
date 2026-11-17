@@ -2,6 +2,7 @@
 
 import { Alert02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import type * as React from 'react';
 import { type RefObject, useCallback, useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -57,11 +58,15 @@ export function MediaPlayer({
   kind,
   control,
   className,
+  fallback,
 }: {
-  file: File;
+  /** The file, or a playable stand-in for it (same timeline). */
+  file: Blob;
   kind: 'video' | 'audio';
   control: PlayerControl;
   className?: string;
+  /** Shown under the "cannot play" note (a button that builds a playable preview). */
+  fallback?: React.ReactNode;
 }) {
   const { elementRef, setTime, setPlayable, stopAtRef } = control.bind;
   const local = useRef<HTMLVideoElement & HTMLAudioElement>(null);
@@ -71,6 +76,7 @@ export function MediaPlayer({
     if (!m) return;
     // Remount (key) the player for a new file; its state starts fresh.
     elementRef.current = m;
+    setPlayable(true);
     const url = URL.createObjectURL(file);
     m.src = url;
     let raf = 0;
@@ -126,6 +132,7 @@ export function MediaPlayer({
           This browser cannot play this format, so there is no preview. The timeline and the times below still work.
         </p>
       ) : null}
+      {!control.playable && fallback ? <div className="px-3 pb-2.5">{fallback}</div> : null}
     </div>
   );
 }

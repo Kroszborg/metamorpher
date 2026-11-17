@@ -26,7 +26,7 @@ function request(o: Options, id: string, duration: number): GifRequest {
 const log = createJobLog();
 
 const job = perFile<Options>(async (input, o, ctx) => {
-  const info = await ctx.engines.media.probe(input.file, ctx.signal);
+  const info = await ctx.engines.media.inspect(input.file, ctx.signal);
   const req = request(o, input.id, info.duration || DEFAULT_SECONDS);
   return runMedia(log, input, ctx, (opts) => ctx.engines.media.videoToGif(input.file, req, opts));
 });
@@ -148,7 +148,7 @@ function GifPreview({
   range: TrimRange | null;
   onRange: (r: TrimRange) => void;
 }) {
-  const { info } = useMediaInfo(input.file);
+  const { info } = useMediaInfo(input.file, true);
   const duration = info?.duration ?? 0;
   // Until the user picks a range, show the default first seconds as selected.
   const shown = range ?? (duration > 0 ? clampRange({ start: 0, end: Math.min(duration, DEFAULT_SECONDS) }, duration) : null);

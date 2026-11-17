@@ -3,8 +3,11 @@
 import { useEffect, useState } from 'react';
 import { type Capabilities, type MediaInfo, mediaEngine } from '@/engines/media';
 
-/** Probes a file with the media engine (cached per File). */
-export function useMediaInfo(file: File | null | undefined): { info: MediaInfo | null; loading: boolean; error: string | null } {
+/**
+ * Probes a file with the media engine (cached per File). `deep` also asks
+ * ffmpeg.wasm about files the fast engine cannot read (`mediaEngine.inspect`).
+ */
+export function useMediaInfo(file: File | null | undefined, deep = false): { info: MediaInfo | null; loading: boolean; error: string | null } {
   const [state, setState] = useState<{ file: File | null; info: MediaInfo | null; error: string | null }>({
     file: null,
     info: null,
@@ -13,14 +16,14 @@ export function useMediaInfo(file: File | null | undefined): { info: MediaInfo |
   useEffect(() => {
     if (!file) return;
     let live = true;
-    mediaEngine.probe(file).then(
+    (deep ? mediaEngine.inspect(file) : mediaEngine.probe(file)).then(
       (info) => live && setState({ file, info, error: null }),
       (err: unknown) => live && setState({ file, info: null, error: err instanceof Error ? err.message : 'Could not read this file.' }),
     );
     return () => {
       live = false;
     };
-  }, [file]);
+  }, [file, deep]);
   if (!file) return { info: null, loading: false, error: null };
   const current = state.file === file;
   return { info: current ? state.info : null, loading: !current, error: current ? state.error : null };

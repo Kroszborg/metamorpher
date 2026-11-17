@@ -28,6 +28,8 @@ export type MediaInfo = {
   readable: boolean;
   /** Why it is not readable, for the UI. */
   reason?: string;
+  /** Which engine read the headers: Mediabunny (default) or ffmpeg.wasm for formats only it can read. */
+  engine?: EngineName;
   /** Container name as Mediabunny reports it ("MP4", "Matroska"…). */
   format?: string;
   /** Seconds from the first to the last timestamp. 0 when unknown. */
@@ -41,6 +43,8 @@ export type MediaInfo = {
 
 export type VideoInfo = {
   codec: VideoCodecId | 'prores' | null;
+  /** Display name for codecs outside VideoCodecId ("MPEG-4 Part 2", "WMV8"), from the ffmpeg probe. */
+  label?: string;
   /** Coded size, before rotation. */
   codedWidth: number;
   codedHeight: number;
@@ -57,6 +61,8 @@ export type VideoInfo = {
 
 export type AudioInfo = {
   codec: string | null;
+  /** Display name for codecs the labels do not know ("WMA v2"), from the ffmpeg probe. */
+  label?: string;
   sampleRate: number;
   channels: number;
   bitrate: number | null;
@@ -96,10 +102,13 @@ export type ConvertRequest = {
   video?: VideoRequest;
   audio?: AudioRequest;
   /** Seconds in the input's timeline. `accurate: false` cuts at key frames without re-encoding. */
-  trim?: { start: number; end: number; accurate: boolean };
+  trim?: TrimRequest;
   /** Playback speed factor (0.25–4). Audio keeps its pitch when `keepPitch`. */
   speed?: { factor: number; keepPitch: boolean };
 };
+
+/** Seconds from the file's start; `accurate: false` cuts at key frames without re-encoding. */
+export type TrimRequest = { start: number; end: number; accurate: boolean };
 
 export type GifRequest = {
   fps: number;

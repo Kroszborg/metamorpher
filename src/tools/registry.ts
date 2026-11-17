@@ -87,6 +87,9 @@ import {
   ZoomInAreaIcon,
   WorkflowSquare01Icon,
   TextNumberSignIcon,
+  BinaryCodeIcon,
+  FileViewIcon,
+  FileTextIcon,
 } from '@hugeicons/core-free-icons';
 import { CATEGORIES } from './categories';
 import type { AvailableTool, Category, CategoryId, ToolDefinition, ToolInfo } from './types';
@@ -141,6 +144,15 @@ const AUDIO = [
   '.aif',
 ] as const;
 const ANY: readonly string[] = [];
+/** Text and source files the text viewer opens (anything else can still be opened as text). */
+const TEXT_FILES = [
+  'text/*',
+  '.txt', '.log', '.text', '.md', '.markdown', '.csv', '.tsv', '.json', '.jsonl', '.ndjson', '.xml', '.yaml', '.yml', '.toml',
+  '.ini', '.cfg', '.conf', '.env', '.properties', '.html', '.htm', '.css', '.scss', '.less', '.js', '.mjs', '.cjs', '.jsx',
+  '.ts', '.tsx', '.py', '.rb', '.php', '.java', '.kt', '.scala', '.c', '.h', '.cpp', '.hpp', '.cs', '.go', '.rs', '.swift',
+  '.lua', '.pl', '.r', '.jl', '.sh', '.bash', '.zsh', '.ps1', '.bat', '.cmd', '.sql', '.vue', '.svelte', '.dart', '.tex',
+  '.bib', '.diff', '.patch', '.proto', '.graphql', '.srt', '.vtt', '.ass', '.svg', '.rtf', '.gitignore', '.dockerfile',
+] as const;
 
 export const TOOLS: readonly ToolDefinition[] = [
   // ── Page management ─────────────────────────────────────────────────────
@@ -1002,6 +1014,41 @@ export const TOOLS: readonly ToolDefinition[] = [
     accept: [...VIDEO, ...AUDIO],
     status: 'available',
     load: () => import('./merge-clips'),
+  },
+
+  // ── View & play ─────────────────────────────────────────────────────────
+  {
+    slug: 'open-file',
+    title: 'Open any file',
+    description: 'Drop any file to view or play it: the type is read from its content and the right viewer opens, with links to every tool that takes it.',
+    category: 'view',
+    keywords: ['file viewer', 'open file', 'universal viewer', 'what is this file', 'file type', 'preview', 'view file', 'file opener', 'reader', 'player'],
+    icon: FileViewIcon,
+    accept: ANY,
+    status: 'available',
+    load: () => import('./open-file'),
+  },
+  {
+    slug: 'text-viewer',
+    title: 'Text & code viewer',
+    description: 'Read text and source files with syntax highlighting, line numbers, wrapping, search and encodings; huge logs open in parts.',
+    category: 'view',
+    keywords: ['txt viewer', 'code viewer', 'log viewer', 'syntax highlighting', 'source code', 'encoding', 'notepad', 'read text file', 'large file viewer'],
+    icon: FileTextIcon,
+    accept: TEXT_FILES,
+    status: 'available',
+    load: () => import('./text-viewer'),
+  },
+  {
+    slug: 'hex-viewer',
+    title: 'Hex viewer',
+    description: 'Look at the bytes of any file of any size: offsets, hex and text, go to offset, search bytes or text, and a data inspector.',
+    category: 'view',
+    keywords: ['hex editor', 'hex dump', 'binary viewer', 'bytes', 'offset', 'data inspector', 'xxd', 'magic number'],
+    icon: BinaryCodeIcon,
+    accept: ANY,
+    status: 'available',
+    load: () => import('./hex-viewer'),
   },
 
   // ── AI (on-device) ──────────────────────────────────────────────────────

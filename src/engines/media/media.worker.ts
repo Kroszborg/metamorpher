@@ -60,6 +60,7 @@ import {
   fitShortSide,
   capFps,
   formatBitrate,
+  MIN_VIDEO_BITRATE,
   planAudioBitrate,
   planVideo,
   videoCodecLabel,
@@ -74,6 +75,7 @@ import type {
   GifToVideoRequest,
   MediaInfo,
   MergeRequest,
+  TrimRequest,
   VideoCodecId,
   WorkerOutcome,
 } from './types';
@@ -337,6 +339,21 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** Average bitrate of the primary video track of a finished output, from its packet sizes. */
+async function measuredVideoBitrate(blob: Blob): Promise<number | null> {
+  const input = openInput(blob);
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return null;
+    const stats = await track.computePacketStats();
+    return stats.averageBitrate > 0 ? stats.averageBitrate : null;
+  } catch {
+    return null;
+  } finally {
+    input.dispose();
+  }
+}
+
 // ── Speed (process callbacks) ──────────────────────────────────────────────
 
 function speedAudio(factor: number, keepPitch: boolean, trackStart: number, trackEnd: number) {
@@ -392,6 +409,119 @@ function speedAudio(factor: number, keepPitch: boolean, trackStart: number, trac
   };
 }
 
+// ── MP3 cut without re-encoding ────────────────────────────────────────────
+
+/** LAME tag limits: 12-bit fields, and decoders add 529 samples of their own delay to the start one. */
+const LAME_MAX_DELAY = 0xfff;
+const MP3_DECODER_DELAY = 529;
+
+/** LAME's tag CRC (CRC-16, reflected 0x8005) over the first 190 bytes of the info frame. */
+function lameCrc(bytes: Uint8Array): number {
+  let crc = 0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xa001 : 0);
+  }
+  return crc;
+}
+
+function findAscii(bytes: Uint8Array, text: string, from = 0): number {
+  outer: for (let i = from; i + text.length <= bytes.length; i++) {
+    for (let k = 0; k < text.length; k++) if (bytes[i + k] !== text.charCodeAt(k)) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Makes an MP3 that Mediabunny wrote end on the right sample: sets the LAME
+ * tag's end padding (Mediabunny writes "no end trim") so gapless decoders drop
+ * what follows the out point, and the Xing frame count to the audio frames
+ * only (Mediabunny counts its own info frame too, which makes decoders ignore
+ * the padding). `samples` is how many samples the file should play.
+ */
+async function trimMp3Tail(blob: Blob, samples: number, sampleRate: number): Promise<Blob> {
+  const head = new Uint8Array(await blob.slice(0, 1024).arrayBuffer());
+  const xing = Math.max(findAscii(head, 'Xing'), findAscii(head, 'Info'));
+  const lame = xing >= 0 ? findAscii(head, 'LAME', xing) : -1;
+  if (xing < 0 || lame < 0 || lame + 36 > head.length) return blob;
+  const view = new DataView(head.buffer);
+  if (!(view.getUint32(xing + 4) & 1)) return blob; // No frame count.
+  const frameSamples = sampleRate >= 32000 ? 1152 : 576;
+  const audioFrames = view.getUint32(xing + 8) - 1;
+  const delay = ((head[lame + 21]! << 4) | (head[lame + 22]! >> 4)) + MP3_DECODER_DELAY;
+  const excess = audioFrames * frameSamples - delay - Math.round(samples);
+  if (excess < 0 || excess + MP3_DECODER_DELAY > LAME_MAX_DELAY) return blob;
+  const pad = excess + MP3_DECODER_DELAY;
+  // The CRC runs from the info frame's header: the last frame sync before the Xing tag.
+  let frame = xing - 4;
+  while (frame > 0 && !(head[frame] === 0xff && (head[frame + 1]! & 0xe0) === 0xe0)) frame--;
+  view.setUint32(xing + 8, audioFrames);
+  head[lame + 22] = (head[lame + 22]! & 0xf0) | (pad >> 8);
+  head[lame + 23] = pad & 0xff;
+  view.setUint16(lame + 34, lameCrc(head.subarray(frame, lame + 34)));
+  return new Blob([head.subarray(0, lame + 36), blob.slice(lame + 36)], { type: blob.type });
+}
+
+/**
+ * Fast-mode MP3 cut: copies whole MP3 frames (no re-encoding) from three
+ * frames before the in point (the bit reservoir reaches back about that far)
+ * to the frame holding the out point, and records in the LAME tag how many
+ * samples gapless decoders skip at the start and drop at the end. Players
+ * that honour the tag (browsers, ffmpeg, most music players) start and stop
+ * on the exact sample; the rest play at most one frame (26 ms) more at each end.
+ */
+async function mp3CopyTrim(input: Input, info: MediaInfo, trim: TrimRequest, progress: Progress): Promise<WorkerOutcome | null> {
+  const track = await input.getPrimaryAudioTrack();
+  if (!track || (await track.getCodec()) !== 'mp3') return null;
+  const rate = await track.getSampleRate();
+  const sink = new EncodedPacketSink(track);
+  const start = info.startTime + trim.start;
+  const end = info.startTime + Math.min(trim.end, info.duration);
+  const holding = (await sink.getPacket(start)) ?? (await sink.getFirstPacket());
+  if (!holding) throw new Error('This file has no audio frames in that range.');
+  const frame = holding.duration || 1152 / rate;
+  // As many frames of lead-in as the LAME delay field can describe (up to 3).
+  let first = holding;
+  for (let k = 3; k >= 1; k--) {
+    const p = await sink.getPacket(holding.timestamp - k * frame + frame / 2);
+    if (p && (start - p.timestamp) * rate <= LAME_MAX_DELAY + MP3_DECODER_DELAY) {
+      first = p;
+      break;
+    }
+  }
+  const lead = Math.round((start - first.timestamp) * rate);
+  if (lead < MP3_DECODER_DELAY) return null; // At the very start of the file: the regular copy is exact enough.
+
+  const format = new Mp3OutputFormat();
+  const { output, sink: out } = makeOutput(format);
+  const source = new EncodedAudioPacketSource('mp3');
+  output.addAudioTrack(source);
+  await output.start();
+  const config = await track.getDecoderConfig();
+  let last = first;
+  let firstPacket = true;
+  for await (const packet of sink.packets(first)) {
+    if (packet.timestamp >= end) break;
+    await source.add(packet.clone({ timestamp: packet.timestamp - start }), firstPacket && config ? { decoderConfig: config } : undefined);
+    firstPacket = false;
+    last = packet;
+    progress((packet.timestamp - first.timestamp) / Math.max(1e-3, end - first.timestamp));
+  }
+  source.close();
+  await output.finalize();
+  const blob = await trimMp3Tail(out.finish(format.mimeType), (Math.min(end, last.timestamp + last.duration) - start) * rate, rate);
+  return {
+    ok: true,
+    blob,
+    ext: 'mp3',
+    audio: 'Copied MP3 frames without re-encoding',
+    notes: [
+      'Cut on the exact sample: whole MP3 frames are copied and the LAME tag tells players how much to skip at each end (players that ignore it play up to 26 ms more).',
+    ],
+  };
+}
+
 // ── Convert ────────────────────────────────────────────────────────────────
 
 async function convert(file: File, req: ConvertRequest, onProgress?: Progress): Promise<WorkerOutcome> {
@@ -416,6 +546,13 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
 
   const speed = req.speed && Math.abs(req.speed.factor - 1) > 1e-3 ? req.speed : undefined;
   const trim = req.trim;
+  if (
+    trim && !trim.accurate && req.container === 'mp3' && !wantVideo && info.audio?.codec === 'mp3' &&
+    req.audio?.bitrate === 'copy' && !speed && !req.audio?.sampleRate && !req.audio?.channels && (!req.audio?.codec || req.audio.codec === 'auto' || req.audio.codec === 'mp3')
+  ) {
+    const cut = await mp3CopyTrim(input, info, trim, throttled(onProgress));
+    if (cut) return cut;
+  }
   // Speed changes the packet count, which a reserved MP4 header cannot predict.
   const format = makeFormat(req.container, speed ? false : 'reserve');
   const notes: string[] = [];
@@ -424,6 +561,8 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
 
   // Video
   let videoOpts: ConversionVideoOptions = { discard: true };
+  /** The video bitrate asked of the encoder when re-encoding (for the rate check). */
+  let videoTarget = 0;
   if (wantVideo && info.video) {
     const v = info.video;
     const vr = req.video ?? {};
@@ -484,6 +623,7 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
         quality: new Quality({ bitrate: plan.bitrate }),
         forceTranscode: true,
       };
+      videoTarget = plan.bitrate;
       if (fpsCap) videoOpts.frameRate = fpsCap;
       if (speed) {
         const f = speed.factor;
@@ -500,6 +640,8 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
 
   // Audio
   let audioOpts: ConversionAudioOptions = { discard: true };
+  let outRate = 0;
+  let freshAudioProcess: (() => ConversionAudioOptions['process']) | null = null;
   if (wantAudio && info.audio) {
     const a = info.audio;
     const ar = req.audio ?? {};
@@ -527,6 +669,7 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
       const plan = lossless ? { bitrate: 0 } : planAudioBitrate(wanted, a);
       const channels = ar.channels ?? (a.channels > 2 && (codec === 'opus' || codec === 'mp3' || codec === 'aac') ? 2 : undefined);
       const sampleRate = encoderSampleRate(codec, a.sampleRate, ar.sampleRate);
+      outRate = sampleRate ?? a.sampleRate;
       const encoder = await resolveAudioEncoder(
         codec,
         channels ?? a.channels,
@@ -549,6 +692,8 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
         const tStart = aTrack ? await aTrack.getFirstTimestamp() : 0;
         const tEnd = aTrack ? await aTrack.computeDuration() : info.duration;
         audioOpts.process = speedAudio(speed.factor, speed.keepPitch, tStart, tEnd);
+        // The time-stretcher keeps state: a second pass needs a fresh one.
+        freshAudioProcess = () => speedAudio(speed.factor, speed.keepPitch, tStart, tEnd);
         audioOpts.processedSampleRate = sampleRate ?? a.sampleRate;
         audioOpts.processedNumberOfChannels = channels ?? a.channels;
         notes.push(
@@ -563,37 +708,61 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
     }
   }
 
-  const { output, sink } = makeOutput(format);
-  const options: ConversionOptions = {
-    input,
-    output,
-    tracks: 'primary',
-    video: videoOpts,
-    audio: audioOpts,
-    showWarnings: false,
+  const execute = async (vOpts: ConversionVideoOptions, aOpts: ConversionAudioOptions, report: Progress): Promise<Blob | WorkerOutcome> => {
+    const fmt = makeFormat(req.container, speed ? false : 'reserve');
+    const { output, sink } = makeOutput(fmt);
+    const options: ConversionOptions = { input, output, tracks: 'primary', video: vOpts, audio: aOpts, showWarnings: false };
+    if (trim) {
+      options.trim = { start: info.startTime + trim.start, end: info.startTime + trim.end };
+      options.copy = trim.accurate
+        ? { boundaryTolerance: copyTolerance(info.video?.fps ?? null) }
+        : { boundaryPolicy: 'expand', shiftTolerance: Infinity };
+    } else {
+      options.copy = { shiftTolerance: Infinity };
+    }
+    const conversion = await Conversion.init(options);
+    const bad = discardFallback(conversion, { video: wantVideo, audio: wantAudio });
+    if (bad) return bad;
+    if (!conversion.isValid) return fallback('webcodecs-error', 'set up this conversion');
+    conversion.onProgress = (p) => report(p);
+    try {
+      await conversion.execute();
+    } catch (err) {
+      return fallback('webcodecs-error', `finish (${errorText(err)})`);
+    }
+    return sink.finish(fmt.mimeType);
   };
-  if (trim) {
-    options.trim = { start: info.startTime + trim.start, end: info.startTime + trim.end };
-    options.copy = trim.accurate
-      ? { boundaryTolerance: copyTolerance(info.video?.fps ?? null) }
-      : { boundaryPolicy: 'expand', shiftTolerance: Infinity };
-  } else {
-    options.copy = { shiftTolerance: Infinity };
-  }
-  const conversion = await Conversion.init(options);
-  const bad = discardFallback(conversion, { video: wantVideo, audio: wantAudio });
-  if (bad) return bad;
-  if (!conversion.isValid) return fallback('webcodecs-error', 'set up this conversion');
-  conversion.onProgress = (p) => progress(p);
-  try {
-    await conversion.execute();
-  } catch (err) {
-    return fallback('webcodecs-error', `finish (${errorText(err)})`);
+  let first = await execute(videoOpts, audioOpts, videoTarget ? (p) => progress(p * 0.98) : progress);
+  if (!(first instanceof Blob)) return first;
+  // Hardware encoders overshoot the asked bitrate, most on short clips (+15–35% measured). When the video
+  // came out more than 8% over, encode once more with the bitrate scaled down by the overshoot.
+  if (videoTarget && 'quality' in videoOpts) {
+    const actual = await measuredVideoBitrate(first);
+    if (actual && actual > videoTarget * 1.08) {
+      const retry = Math.max(MIN_VIDEO_BITRATE, Math.round((videoTarget * videoTarget * 0.97) / actual));
+      const second = await execute(
+        { ...videoOpts, quality: new Quality({ bitrate: retry }) },
+        freshAudioProcess ? { ...audioOpts, process: freshAudioProcess() } : audioOpts,
+        progress,
+      );
+      if (second instanceof Blob) {
+        const after = await measuredVideoBitrate(second);
+        notes.push(
+          `The encoder overshot the ${formatBitrate(videoTarget)} video target (${formatBitrate(actual)}), so it was encoded again at ${formatBitrate(retry)}: ${after ? formatBitrate(after) : 'done'}.`,
+        );
+        first = second;
+      }
+    }
   }
   if (trim && !trim.accurate && videoDesc?.startsWith('Copied')) {
     notes.push('Fast mode cuts at the nearest key frame before the in point, so the clip may start slightly early.');
   }
-  return { ok: true, blob: sink.finish(format.mimeType), ext: CONTAINERS[req.container].ext, video: videoDesc, audio: audioDesc, notes };
+  let blob = first;
+  // Re-encoded MP3 cuts: drop the encoder's tail padding so the file ends on the out point.
+  if (req.container === 'mp3' && trim && outRate && !speed && audioDesc?.startsWith('Re-encoded')) {
+    blob = await trimMp3Tail(blob, (Math.min(trim.end, info.duration) - trim.start) * outRate, outRate);
+  }
+  return { ok: true, blob, ext: CONTAINERS[req.container].ext, video: videoDesc, audio: audioDesc, notes };
 }
 
 // ── Video to GIF ───────────────────────────────────────────────────────────
