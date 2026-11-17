@@ -1,0 +1,108 @@
+/*
+ * ── Colour tokens: Citrus ───────────────────────────────────────────────────
+ * Acid lime on near-black in dark mode; olive-lime on light paper in light mode.
+ * Every colour token lives in this file. Light/dark is the `.dark` class from
+ * next-themes.
+ *
+ * Contrast (WCAG AA, checked by scripts/check-contrast.mjs): primary-foreground
+ * on primary, primary on background, primary and sidebar-accent-foreground on
+ * sidebar-accent (composited over sidebar) are all ≥ 4.5:1 in both themes.
+ */
+
+:root {
+  --background: #f7f8f2;
+  --foreground: #171a12;
+  --card: #ffffff;
+  --card-foreground: #171a12;
+  --popover: #ffffff;
+  --popover-foreground: #171a12;
+
+  --primary: #4a6b0a;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0e6;
+  --secondary-foreground: #262a1e;
+  --muted: #eef0e6;
+  --muted-foreground: #53594a;
+  --faint: #9ca192;
+  --accent: #e9ecdf;
+  --accent-foreground: #171a12;
+
+  --destructive: #dc2626;
+  --success: #15803d;
+  --warning: #b45309;
+
+  --border: #e0e3d5;
+  --input: #d2d6c4;
+  --ring: #4a6b0a;
+
+  --chart-1: #4a6b0a;
+  --chart-2: #7a9e22;
+  --chart-3: #6d7262;
+  --chart-4: #b5b9a8;
+  --chart-5: #dc2626;
+  --viz-1: #4a6b0a;
+  --viz-2: #2a78d6;
+  --viz-3: #d4572a;
+  --viz-grid: #eaecdf;
+  --viz-axis: #d2d6c4;
+
+  --sidebar: #f1f3eb;
+  --sidebar-foreground: #53594a;
+  --sidebar-primary: #4a6b0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(74 107 10 / 0.11);
+  --sidebar-accent-foreground: #3a5406;
+  --sidebar-border: #e3e6d9;
+  --sidebar-ring: #4a6b0a;
+
+  --scroll-thumb: #d2d6c4;
+}
+
+:root.dark {
+  --background: #080907;
+  --foreground: #f5f7ee;
+  --card: #10120d;
+  --card-foreground: #f5f7ee;
+  --popover: #161813;
+  --popover-foreground: #f5f7ee;
+
+  --primary: #c8f53a;
+  --primary-foreground: #0b0d04;
+  --secondary: #161813;
+  --secondary-foreground: #f5f7ee;
+  --muted: #161813;
+  --muted-foreground: #a3a896;
+  --faint: #6c7163;
+  --accent: #1d2019;
+  --accent-foreground: #f5f7ee;
+
+  --destructive: #f87171;
+  --success: #4ade80;
+  --warning: #fbbf24;
+
+  --border: #25281f;
+  --input: #3a3e33;
+  --ring: #c8f53a;
+
+  --chart-1: #c8f53a;
+  --chart-2: #9cc21f;
+  --chart-3: #a3a896;
+  --chart-4: #50544a;
+  --chart-5: #f87171;
+  --viz-1: #c8f53a;
+  --viz-2: #3987e5;
+  --viz-3: #e0703f;
+  --viz-grid: #1d2019;
+  --viz-axis: #3a3e33;
+
+  --sidebar: #0b0c09;
+  --sidebar-foreground: #a3a896;
+  --sidebar-primary: #c8f53a;
+  --sidebar-primary-foreground: #0b0d04;
+  --sidebar-accent: rgb(200 245 58 / 0.1);
+  --sidebar-accent-foreground: #ddfa85;
+  --sidebar-border: #1d2019;
+  --sidebar-ring: #c8f53a;
+
+  --scroll-thumb: #3a3e33;
+}

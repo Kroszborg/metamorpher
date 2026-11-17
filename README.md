@@ -1,257 +1,101 @@
-# MetaMorpher 🎨
+# Metamorpher
 
-**Free, unlimited, client-side file converter supporting 700+ conversion types**
+Private file tools that run entirely in your browser. Convert images, video, audio and documents
+and work with PDFs without uploading anything: every file is processed on your device.
 
-![MetaMorpher Screenshot](https://github.com/Kroszborg/metamorpher/blob/main/public/metamorpher.png?raw=true)
+## Tools
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Kroszborg/metamorpher)
+92 tools are available now; the list lives in
+[`src/tools/registry.ts`](src/tools/registry.ts).
 
----
+| Area | Tools | Engines |
+| --- | --- | --- |
+| PDF pages | Merge, split (by range, size, bookmarks, text, in half), delete, extract, organize, rotate, flip, n-up, crop and resize, alternate and mix, PDFs to ZIP | pdf-lib (`@cantoo/pdf-lib`), pdf.js |
+| PDF edit and annotate | Edit PDF (add text in any script the Noto fonts cover, shaped and with subsetted fonts, images, shapes, arrows, drawing, highlight, whiteout; existing text is not editable yet), watermark, page numbers, sign, headers and footers, Bates numbering, flatten, edit metadata, fill form, invert colours | pdf-lib, pdf.js, signature_pad |
+| PDF optimise and security | Compress, encrypt, remove password, unlock, redact, auto-redact personal data (emails, phones with context, cards, IBAN, Aadhaar, PAN, SSN, dates of birth, labelled names and addresses; OCR in 13 languages for scans), redaction checker, privacy scanner and cleaner (also hidden layers, the file ID and EXIF/XMP inside pictures), repair, size analyzer, file hash | MuPDF, qpdf, Ghostscript (all WASM) |
+| Scan, OCR and compare | OCR / searchable PDF and image to text (13 languages incl. Hindi, Marathi, Bengali, Tamil, Telugu; pages turned upright and straightened automatically; multi-page TIFF), scan document (camera or photos: page borders found by edges or brightness, perspective fix, filters), compare PDFs (word diff that can ignore case, punctuation and spacing, pixel diff, full report) | Tesseract 5 (tesseract.js 7 core, WASM), MuPDF |
+| Convert to PDF | Images, Markdown, HTML, text, CSV, Word (.docx, layout approximated: headers, footers, page numbers, tab stops, footnotes), PowerPoint (.pptx: one page per slide with real text; charts not drawn), Excel/ODS, EPUB/FB2/MOBI to PDF; create a PDF; convert document | pdf-lib, MuPDF HTML layout with Noto fonts (selectable text, bookmarks), SheetJS CE |
+| Convert from PDF | PDF to JPG/PNG, TIFF, text, Word, HTML and EPUB (tables and multi-column pages), Excel (ruled and aligned tables, wrapped cells joined), PowerPoint (editable text over the page graphics, or page pictures); extract images; PDF to audio (read aloud with system voices, or MP3/WAV with an on-device voice) | pdf.js, MuPDF, SheetJS CE, Kokoro-82M |
+| Image | Convert, compress, resize, crop, HEIC to JPG, strip EXIF, SVG to PNG, favicon/ICO; remove background and upscale 2×/4× (on-device models) | jSquash codecs (MozJPEG, oxipng, libwebp, libavif), heic-to; ORMBG / BiRefNet lite / MODNet, Swin2SR |
+| Audio and video | Convert video, convert audio, compress video, trim and cut, extract audio, mute, video to GIF, GIF to video, change speed, merge clips | Mediabunny (WebCodecs), ffmpeg.wasm fallback |
+| AI | Chat with PDF (answers with page citations; PDF, Word, Markdown, text), summarize PDF (short, detailed, bullets, per chapter), transcribe audio and video (TXT/SRT/VTT) | Transformers.js + ONNX Runtime Web (WebGPU or WASM): Qwen2.5 / SmolLM2, all-MiniLM-L6-v2, Whisper; or your own API key for Anthropic, OpenAI, Gemini, Groq, OpenRouter or an OpenAI-compatible server (Ollama, LM Studio) |
+| Business and everyday | Invoice generator (India GST: GSTIN check, CGST+SGST/UTGST or IGST, HSN summary, amount in words with lakh/crore, UPI QR; or any currency), POS receipts (58/80 mm PDF and PNG cut to length), résumé builder (form with four ATS-friendly templates, or real LaTeX with five templates compiled in the browser), text to handwriting, whiteboard, QR codes and barcodes (make and read) | typeset (MuPDF HTML layout), BusyTeX (TeX Live 2026 pdfLaTeX in WebAssembly), CodeMirror 6, uqr, jsQR, JsBarcode, perfect-freehand |
+| Share and automate | P2P file share (WebRTC data channel, codes copied or scanned, no server), workflow builder (chain images to PDF, merge, rotate, page numbers, watermark, compress, encrypt, image resize/convert, ZIP) | WebRTC, the engines above |
 
-## 🌟 Overview
+## Development
 
-MetaMorpher is a powerful, privacy-focused file conversion tool that runs entirely in your browser. Convert images, videos, audio, documents, and PDFs without uploading anything to a server.
+Requires Node 24 and npm.
 
-### ✨ Why MetaMorpher?
-
-- **🔒 100% Private**: All conversions happen in your browser - files never leave your device
-- **⚡ Lightning Fast**: Powered by WebAssembly for native-like performance
-- **💰 Completely Free**: No file size limits, no account required, no hidden fees
-- **🎯 700+ Conversions**: Support for all major file formats
-- **📱 Progressive Web App**: Install on your device and use offline
-- **🌓 Dark Mode**: Beautiful interface that's easy on your eyes
-
----
-
-## 🚀 Supported Conversions
-
-### 🖼️ Images (144 conversions)
-Convert between: **JPG, JPEG, PNG, GIF, BMP, WEBP, ICO, TIF, TIFF, SVG, RAW, TGA**
-
-### 🎥 Videos (256+ conversions)
-Convert between: **MP4, M4V, MP4V, 3GP, 3G2, AVI, MOV, WMV, MKV, FLV, OGV, WEBM, H264, 264, HEVC, 265**
-
-**Special Features:**
-- ✅ Video → GIF conversion
-- ✅ GIF → Video conversion
-- ✅ Video → Image (thumbnail extraction)
-- ✅ All video formats → All image formats
-
-### 🎵 Audio (49 conversions)
-Convert between: **MP3, WAV, OGG, AAC, WMA, FLAC, M4A**
-
-Extract audio from videos instantly!
-
-### 📄 Documents (NEW - 50+ conversions)
-- **Markdown** (`.md`) → PDF, HTML
-- **HTML** (`.html`) → PDF
-- **Text** (`.txt`) → PDF
-- **DOCX** (`.docx`) → PDF, HTML, Markdown
-
-### 📑 PDF (Enhanced)
-- **PDF → Images**: Converts all pages to PNG/JPG (creates ZIP for multi-page)
-- **Images → PDF**: Combine multiple images into one PDF with drag-to-reorder
-
----
-
-## 🎯 Key Features
-
-### Multi-Format Support
-- **700+ conversion types** across images, videos, audio, and documents
-- All major multimedia formats supported
-- Batch conversion support
-
-### Advanced Features
-- 🎬 **Video Thumbnails**: Extract frames from videos as images
-- 📑 **Multi-Page PDF**: Convert all PDF pages to images at once
-- 🖼️ **Images to PDF**: Create PDFs from multiple images with custom ordering
-- 📝 **Document Conversion**: Convert Markdown, HTML, and DOCX files
-
-### Privacy & Performance
-- Client-side processing with FFmpeg WebAssembly
-- No server uploads - everything happens in your browser
-- No file size restrictions
-- Secure and private
-
-### User Experience
-- Drag-and-drop interface
-- Real-time conversion progress
-- Dark/Light mode support
-- Mobile-responsive design
-- PWA support (install as app)
-
----
-
-## 🛠️ Tech Stack
-
-- **[Next.js 15](https://nextjs.org/)** - React framework
-- **[React 19](https://react.dev/)** - UI library
-- **[TypeScript](https://www.typescriptlang.org/)** - Type safety
-- **[Tailwind CSS 3](https://tailwindcss.com/)** - Styling
-- **[FFmpeg WebAssembly](https://github.com/ffmpegwasm/ffmpeg.wasm)** - Video/audio/image conversion
-- **[PDF.js](https://mozilla.github.io/pdf.js/)** - PDF parsing
-- **[jsPDF](https://github.com/parallax/jsPDF)** - PDF generation
-- **[Mammoth.js](https://github.com/mwilliamson/mammoth.js)** - DOCX processing
-- **[Markdown-it](https://github.com/markdown-it/markdown-it)** - Markdown parsing
-- **[JSZip](https://stuk.github.io/jszip/)** - Archive handling
-- **[shadcn/ui](https://ui.shadcn.com/)** - UI components
-- **[next-pwa](https://github.com/shadowwalker/next-pwa)** - PWA support
-
----
-
-## 📦 Getting Started
-
-### Prerequisites
-- **Node.js 18.x** or higher
-- **npm** or **yarn**
-
-### Installation
-
-1. **Clone the repository:**
-```bash
-git clone https://github.com/Kroszborg/metamorpher.git
-cd metamorpher
-```
-
-2. **Install dependencies:**
 ```bash
 npm install
-```
-
-3. **Run development server:**
-```bash
-npm run dev
-```
-
-4. **Open your browser:**
-Navigate to [http://localhost:3000](http://localhost:3000)
-
-### Build for Production
-
-```bash
-npm run build
+npm run dev        # http://localhost:3000
+npm run typecheck
+npm run lint
+npm run build      # next build, then serwist build (offline service worker)
 npm start
 ```
 
----
+`predev`/`prebuild` run `scripts/copy-runtime-assets.mjs`, which copies the ffmpeg.wasm core
+and worker, pdf.js data, the image codecs, the MuPDF, qpdf and Ghostscript wasm files, the Noto document fonts and the ONNX Runtime Web wasm into `public/vendor` (gitignored) so they are served from this origin. It
+fails if `@ffmpeg/core` does not match the version `@ffmpeg/ffmpeg` expects.
 
-## 🌐 Deployment
+Set `NEXT_PUBLIC_SITE_URL` in production for canonical URLs and the sitemap (on Vercel the
+production domain is used automatically).
 
-### Deploy to Vercel (Recommended)
+## Structure
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Kroszborg/metamorpher)
+```
+src/
+  app/                  routes: dashboard, /tools/[slug], /category/[slug], /recent, /starred,
+                        sitemap, robots, not-found; globals.css and colors.css (all colour tokens)
+  components/
+    ui/ kit/ layout/    design system and app shell (ported from the Bridge dashboard)
+    workbench/          shared tool frame: dropzone, file list, options, run bar, results, job types
+    tools/              tool cards, grid, tool host, star button
+  engines/              pdf, mupdf, qpdf, ghostscript, image, media, ffmpeg, archive, typeset (document → PDF)
+                        and pdf-extract (PDF → Word/HTML/EPUB/Excel) engines (workers behind Comlink)
+  tools/                registry.ts, categories.ts, types.ts and one folder per tool
+  lib/                  file helpers, theme colour, starred/recent storage, site constants
+  sw.ts                 service worker source (Serwist)
+docs/ADDING_A_TOOL.md   how to add a tool
+```
 
-**Or manually:**
+To add a tool, read [docs/ADDING_A_TOOL.md](docs/ADDING_A_TOOL.md): one folder plus one registry
+entry.
 
-1. Push your code to GitHub
-2. Import project to [Vercel](https://vercel.com)
-3. Deploy with zero configuration
+## Privacy
 
-### Environment Variables
-No environment variables needed! Everything runs client-side.
+There is no server-side processing. Starred and recently opened tools are kept in your browser's
+local storage (tool names only, never files). No third-party scripts are loaded, and the app makes
+no requests to other sites, with three exceptions that happen only after you choose them:
 
----
+- **Connecting two devices in P2P file share across networks.** Turning on the STUN helper (off by
+  default) makes both browsers ask stun.l.google.com for their public address. Files never go there;
+  they travel directly between the browsers, encrypted.
+- **Downloading an on-device model.** Pressing a model's Download button (which shows its size,
+  licence and host first) fetches it once from huggingface.co; Hugging Face sees your IP address,
+  never your files. Models stay in this browser's storage for offline use and can be removed in
+  AI settings (/settings/ai). After that, the model runs entirely on your device.
+- **Using your own API key.** If you add a key for Anthropic, OpenAI, Google Gemini, Groq,
+  OpenRouter or an OpenAI-compatible server, the tool sends what it says it sends (for chat and
+  summaries, your question and the relevant passages or parts of the document; for transcription,
+  the audio track) directly from your browser to that provider, under its data policy. Keys are
+  stored only in this browser's local storage and are sent only to the provider they belong to.
 
-## 💡 How to Use
+Finding the relevant passages for a question always happens on your device. Chat history is kept
+in this browser's IndexedDB (questions, answers and page numbers, not the documents) until you
+clear it.
 
-### Basic Conversion
-1. **Upload**: Drag and drop files or click to browse
-2. **Select Format**: Choose the output format from the dropdown
-3. **Convert**: Click "Convert All" button
-4. **Download**: Get your converted files instantly
+## License
 
-### Advanced Features
+AGPL-3.0-or-later, see [LICENSE](LICENSE). If you run a modified version as a public service, you
+must make its source available to its users. Bundled engines include MuPDF and Ghostscript (AGPL),
+the ffmpeg.wasm core (GPL-2.0-or-later) and libheif (LGPL), each served as a separate file. The
+document fonts (Noto, Carlito, Caladea) are under the SIL Open Font License 1.1; SheetJS Community
+Edition is Apache-2.0. Transformers.js and ONNX Runtime Web are Apache-2.0 and MIT; the PDF to audio
+tool bundles eSpeak NG (GPL-3.0, via the `phonemizer` package). On-device model weights are
+downloaded separately and are all licensed for commercial use: Qwen2.5 0.5B/1.5B Instruct,
+SmolLM2, Whisper, ORMBG, Swin2SR, Kokoro-82M, all-MiniLM-L6-v2 and MODNet (Apache-2.0) and
+BiRefNet lite (MIT).
 
-#### Create PDF from Images
-1. Switch to **"Images to PDF"** tab
-2. Upload multiple images
-3. Drag to reorder pages
-4. Select page size (A4, Letter, Legal)
-5. Choose orientation (Portrait, Landscape)
-6. Click "Create PDF"
-
-#### Extract Video Thumbnail
-1. Upload video file
-2. Select output format (JPG, PNG, etc.)
-3. Click on **"Image"** tab in the format selector
-4. Choose image format
-5. Convert to get thumbnail
-
-#### Convert Multi-Page PDF to Images
-1. Upload PDF file
-2. Select PNG or JPG as output
-3. Convert - get ZIP file with all pages
-
----
-
-## 📚 Documentation
-
-See [IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md) for detailed technical documentation and implementation details.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the project
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
-### Development Guidelines
-- Follow TypeScript best practices
-- Write clean, readable code
-- Test your changes thoroughly
-- Update documentation as needed
-
----
-
-## 📝 License
-
-This project is licensed under the **MIT License** - see the [LICENSE](./LICENSE) file for details.
-
----
-
-## 🙏 Acknowledgments
-
-- [FFmpeg](https://ffmpeg.org/) - Powerful multimedia framework
-- [@ffmpeg/ffmpeg](https://github.com/ffmpegwasm/ffmpeg.wasm) - WebAssembly port
-- [PDF.js](https://mozilla.github.io/pdf.js/) - Mozilla's PDF renderer
-- [jsPDF](https://github.com/parallax/jsPDF) - Client-side PDF generation
-- [Mammoth.js](https://github.com/mwilliamson/mammoth.js) - DOCX to HTML/Markdown
-- [shadcn/ui](https://ui.shadcn.com/) - Beautiful UI components
-- [Next.js](https://nextjs.org/) - The React Framework
-- [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS
-
----
-
-## 📧 Contact
-
-**Abhiman Panwar (Kroszborg)**
-
-- GitHub: [@Kroszborg](https://github.com/Kroszborg)
-- Project Link: [https://github.com/Kroszborg/metamorpher](https://github.com/Kroszborg/metamorpher)
-
----
-
-## ⭐ Show Your Support
-
-If you found this project helpful, please consider giving it a star on GitHub! It helps others discover the project.
-
-[![GitHub stars](https://img.shields.io/github/stars/Kroszborg/metamorpher?style=social)](https://github.com/Kroszborg/metamorpher/stargazers)
-
----
-
-## 🔮 Roadmap
-
-- [ ] XLSX/CSV spreadsheet conversions
-- [ ] EPUB ebook support
-- [ ] Image editing features (crop, resize, filters)
-- [ ] Batch ZIP download
-- [ ] More document formats
-
----
-
-**Made with ❤️ by [Kroszborg](https://github.com/Kroszborg)**
+Made by [Kroszborg](https://www.kroszborg.co/).
