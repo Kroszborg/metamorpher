@@ -42,6 +42,76 @@ fails if `@ffmpeg/core` does not match the version `@ffmpeg/ffmpeg` expects.
 Set `NEXT_PUBLIC_SITE_URL` in production for canonical URLs and the sitemap (on Vercel the
 production domain is used automatically).
 
+## Backend (optional): accounts, sync, statistics, admin
+
+The tool site needs no server. An optional backend adds accounts (email + password), opt-in sync
+of starred/recent tools, run history and Chat with PDF conversations, first-party anonymous usage
+statistics and an admin dashboard. It never receives files.
+
+**Master switch.** Everything below is off unless `ENABLE_BACKEND=1`. With it off (the default in
+production) the build has no account button, account pages say accounts are unavailable, `/admin`
+is a 404, `/api/*` answers 503 and pages send no statistics. `NEXT_PUBLIC_*` switches are computed in
+`next.config.ts` at build time, so redeploy after changing `ENABLE_BACKEND`, `DATABASE_URL`,
+`BETTER_AUTH_SECRET`, `RESEND_API_KEY`/`EMAIL_FROM` or `ANALYTICS_DISABLED`. Every variable is
+documented in [`.env.example`](.env.example).
+
+| Variable | Purpose |
+| --- | --- |
+| `ENABLE_BACKEND` | `1` turns the backend on. |
+| `DATABASE_URL` | Neon Postgres connection string. In development it can be left out: an embedded PGlite database is created in `.data/` (gitignored) and migrated automatically. |
+| `BETTER_AUTH_SECRET` | Long random string that signs sessions and tokens (required in production). |
+| `BETTER_AUTH_URL` | Public origin for email links and the CSRF origin check (defaults to `NEXT_PUBLIC_SITE_URL`). |
+| `ADMIN_EMAILS` | Comma-separated emails allowed into `/admin`. |
+| `RESEND_API_KEY`, `EMAIL_FROM` | Email via Resend. Without them, development prints links to the console and `.data/dev-mail.log`; production allows sign-up without verification and hides password reset (shown as a warning in /admin/system). |
+| `CRON_SECRET` | Bearer secret for the daily rollup route Vercel Cron calls (`vercel.json`). |
+| `ANALYTICS_DISABLED` | `1` switches usage statistics off. |
+
+### Connecting Neon
+
+1. Create a Neon project (free tier) and copy its connection string (`postgres://…?sslmode=require`).
+2. On Vercel, set `ENABLE_BACKEND=1`, `DATABASE_URL`, `BETTER_AUTH_SECRET`, `ADMIN_EMAILS`,
+   `CRON_SECRET` and, for email, `RESEND_API_KEY` and `EMAIL_FROM` (Production and Preview).
+3. Apply the migrations from your machine: `DATABASE_URL='postgres://…' npm run db:migrate`
+   (or put `DATABASE_URL` in `.env.local`, which is gitignored, and run `npm run db:migrate`).
+4. Redeploy. Check `/admin/system`: database connected, migrations up to date, no warnings.
+
+Schema changes: edit `src/server/db/schema.ts`, run `npm run db:generate` (writes SQL to
+`drizzle/`), commit it, then `npm run db:migrate` against Neon before deploying. Locally, the dev
+server applies new migrations to PGlite on start (`npm run db:migrate` also works with the dev server
+stopped; PGlite allows one process at a time).
+
+### How it is built
+
+- **Auth**: Better Auth with the Drizzle adapter (`src/server/auth.ts`, route `/api/auth/*`): sign-up
+  with email verification, sign-in, sign-out, password reset, change password, sessions list and
+  revoke, delete account (cascades to every row). Passwords: at least 10 characters, not a common
+  password or a simple sequence, not containing the email. Rate limits are stored in the database
+  (sign-in 5/min, sign-up 10/h, reset and verification emails 3/15 min per IP; the IP comes from
+  `x-forwarded-for`, which Vercel sets itself). Cookies are httpOnly, `SameSite=Lax`, `Secure` in
+  production; Better Auth checks the Origin of every POST and `/api/me/*` mutations require a
+  same-origin request. Sessions keep a coarse device label ("Chrome on Windows"), never the IP.
+- **Static pages stay static**: no layout reads cookies or headers. The account button and account
+  pages render on the client; signed-out visitors make no account requests (a local hint, set at
+  sign-in, tells the top bar to load the account). Only `/admin` renders per request.
+- **Sync** (`src/lib/account/sync.ts`, loaded only for signed-in browsers; every switch off by
+  default on `/account`): starred/recent tools with a three-way merge, run history recorded from the
+  workbench's run events (`src/lib/events.ts`), and Chat with PDF conversations through the chat
+  store (`src/lib/ai/chat-store.ts`). `/history` lists and deletes runs and conversations;
+  `/api/me/export` downloads everything as JSON.
+- **Statistics** (`src/lib/analytics/beacon.ts` → `/api/e` → `src/server/analytics.ts`): after the
+  page is idle, `sendBeacon` posts page paths and tool events (opened, started, succeeded, failed with
+  a short error category, cancelled; duration and a size bucket). No cookies or browser storage IDs;
+  the server stores no IP or user-agent string, only coarse browser/OS/device class, the country
+  from Vercel's geo header, the referring host, and a visitor key hashed with a random salt that is
+  replaced daily (old salts deleted). Do Not Track, Global Privacy Control, the footer's
+  "Usage statistics" switch and automation (webdriver, bot user agents) all stop it. Raw events are
+  rolled up into `analytics_daily` by `/api/cron/rollup` (daily, `CRON_SECRET`) and deleted after
+  three days. Visitors are daily uniques: the rotating key cannot link days.
+- **Admin** (`/admin`, `src/app/admin`): Overview, Tools (with per-tool trend), Audience, Users
+  (search, disable/enable, sign out, delete; no impersonation) and System (database, migrations, email,
+  warnings, last rollup, row counts). Every page and server action checks `ADMIN_EMAILS` on the server
+  and returns 404 to anyone else. Charts are small hand-written SVG (no chart library).
+
 ## Structure
 
 ```
@@ -55,8 +125,12 @@ src/
   engines/              pdf, mupdf, qpdf, ghostscript, image, media, ffmpeg, archive, typeset (document → PDF)
                         and pdf-extract (PDF → Word/HTML/EPUB/Excel) engines (workers behind Comlink)
   tools/                registry.ts, categories.ts, types.ts and one folder per tool
-  lib/                  file helpers, theme colour, starred/recent storage, site constants
+  lib/                  file helpers, theme colour, starred/recent storage, site constants,
+                        account client (lib/account), statistics beacon (lib/analytics), events bus
+  server/               optional backend: config, Drizzle schema and connection, Better Auth, mail,
+                        sync data access, analytics ingest/rollup, admin queries (server-only)
   sw.ts                 service worker source (Serwist)
+drizzle/                SQL migrations (generated)
 docs/ADDING_A_TOOL.md   how to add a tool
 ```
 
@@ -65,7 +139,7 @@ entry.
 
 ## Privacy
 
-There is no server-side processing. Starred and recently opened tools are kept in your browser's
+There is no server-side file processing. Starred and recently opened tools are kept in your browser's
 local storage (tool names only, never files). No third-party scripts are loaded, and the app makes
 no requests to other sites, with three exceptions that happen only after you choose them:
 
@@ -85,6 +159,11 @@ no requests to other sites, with three exceptions that happen only after you cho
 Finding the relevant passages for a question always happens on your device. Chat history is kept
 in this browser's IndexedDB (questions, answers and page numbers, not the documents) until you
 clear it.
+
+When the optional backend is switched on (see above), accounts store an email, name, password hash
+and opt-in sync data (tool names, run metadata with file names only if the user allows it, chat
+text and citations), and pages send anonymous usage statistics as described there. The full,
+user-facing description is the `/privacy` page.
 
 ## License
 

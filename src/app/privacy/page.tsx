@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { UsageStatsSwitch } from '@/components/analytics/usage-stats-switch';
 import { PageHeader } from '@/components/kit/page-header';
 import { Breadcrumb } from '@/components/layout/breadcrumb';
+import { ACCOUNTS_ENABLED, ANALYTICS_ENABLED } from '@/lib/account/flags';
 import { SOURCE_URL } from '@/lib/site';
 
 export const metadata: Metadata = {
@@ -33,13 +34,28 @@ export default function PrivacyPage() {
           subtitle="Plainly: your files never leave your device. This page lists everything else, and it describes what the code actually does."
         />
 
+        {!ACCOUNTS_ENABLED && !ANALYTICS_ENABLED ? (
+          <div className="rounded-xl border bg-card p-4 text-sm/relaxed">
+            <strong className="font-medium">This site currently runs without accounts and without usage statistics.</strong>{' '}
+            <span className="text-muted-foreground">
+              Pages make no requests to our servers beyond loading the site itself. The sections on statistics and accounts
+              below describe what applies if the operator switches them on.
+            </span>
+          </div>
+        ) : null}
+
         <Section title="Your files">
           <p>
             <strong>Every tool runs in your browser.</strong> Files you open are read and processed on your device and are
             never uploaded, with or without an account. Nothing on our servers receives a file, its contents or a preview.
           </p>
-          <p>Two AI features contact other services, and only after you choose them:</p>
+          <p>Three features contact other services, and only after you choose them:</p>
           <ul>
+            <li>
+              <strong>P2P file share across networks</strong>, with its STUN helper switched on (off by default), asks
+              stun.l.google.com for each browser’s public address. Files never go there; they travel directly between the
+              two browsers, encrypted.
+            </li>
             <li>
               <strong>Downloading an on-device model</strong> fetches it once from huggingface.co, which sees your IP
               address but never your files.
@@ -85,11 +101,13 @@ export default function PrivacyPage() {
           </p>
           <p>
             Statistics are off automatically when your browser sends <strong>Do Not Track</strong> or{' '}
-            <strong>Global Privacy Control</strong>. You can also switch them off here or in the footer:
+            <strong>Global Privacy Control</strong>. You can also switch them off{ANALYTICS_ENABLED ? ' here or in the footer:' : ' in the footer.'}
           </p>
-          <div className="rounded-xl border bg-card p-4 text-foreground">
-            <UsageStatsSwitch withHint />
-          </div>
+          {ANALYTICS_ENABLED ? (
+            <div className="rounded-xl border bg-card p-4 text-foreground">
+              <UsageStatsSwitch withHint />
+            </div>
+          ) : null}
         </Section>
 
         <Section title="With an account (optional)">

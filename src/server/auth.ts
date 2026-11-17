@@ -158,8 +158,9 @@ function createAuth(db: Db) {
 
 export type Auth = ReturnType<typeof createAuth>;
 
-type Holder = { auth?: Auth };
-const holder: Holder = ((globalThis as { __metamorpherAuth?: Holder }).__metamorpherAuth ??= {});
+// Module scope (not globalThis): after an edit in development the instance is
+// rebuilt with the new code. The database handle underneath is shared.
+const holder: { auth?: Auth } = {};
 
 /** The Better Auth instance, or null when accounts are switched off. */
 export async function getAuth(): Promise<Auth | null> {
