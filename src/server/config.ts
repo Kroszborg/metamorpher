@@ -31,7 +31,10 @@ export const serverConfig = {
 };
 
 /** A database is available: Neon in production, PGlite in development. */
-export const hasDatabase = Boolean(serverConfig.databaseUrl) || serverConfig.usePglite;
+/** Master switch, mirrored in next.config.ts: the backend is off unless ENABLE_BACKEND=1. */
+export const backendEnabled = env.ENABLE_BACKEND === '1';
+
+export const hasDatabase = backendEnabled && (Boolean(serverConfig.databaseUrl) || serverConfig.usePglite);
 
 /** Accounts need a database and, in production, a secret for signing cookies. */
 export const accountsEnabled = hasDatabase && (Boolean(serverConfig.authSecret) || isDev);

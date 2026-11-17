@@ -1,7 +1,7 @@
 import 'server-only';
 import { neon } from '@neondatabase/serverless';
 import { drizzle, type NeonHttpDatabase } from 'drizzle-orm/neon-http';
-import { serverConfig } from '../config';
+import { hasDatabase, serverConfig } from '../config';
 import * as schema from './schema';
 
 export { schema };
@@ -30,6 +30,7 @@ async function connect(): Promise<Db | null> {
  * DATABASE_URL). Callers must handle null by switching the feature off.
  */
 export function getDb(): Promise<Db | null> {
+  if (!hasDatabase) return Promise.resolve(null);
   if (!holder.db) {
     holder.db = connect().catch((err: unknown) => {
       holder.db = undefined;

@@ -6,7 +6,10 @@ export default function nextConfig(phase: string): NextConfig {
   const env = process.env;
   // Build-time switches for the client, so signed-out pages never ask the
   // server whether accounts exist. Development always has a database (PGlite).
-  const hasDb = dev || Boolean(env.DATABASE_URL);
+  // Master switch: accounts, history sync, statistics and /admin stay off until
+  // ENABLE_BACKEND=1 is set (they are not finished being verified yet).
+  const backend = env.ENABLE_BACKEND === '1';
+  const hasDb = backend && (dev || Boolean(env.DATABASE_URL));
   const accounts = hasDb && (dev || Boolean(env.BETTER_AUTH_SECRET));
   const mail = dev || Boolean(env.RESEND_API_KEY && env.EMAIL_FROM);
   const analytics = hasDb && !(env.ANALYTICS_DISABLED === '1' || env.ANALYTICS_DISABLED === 'true');
