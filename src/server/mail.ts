@@ -27,7 +27,17 @@ function render(m: Mail) {
 async function send(m: Mail): Promise<void> {
   if (!mailConfigured) {
     if (serverConfig.isDev) {
-      console.info(`\n[mail:dev] ${m.subject} -> ${m.to}\n[mail:dev] ${m.action}: ${m.url}\n`);
+      const text = `[mail:dev] ${m.subject} -> ${m.to}\n[mail:dev] ${m.action}: ${m.url}\n`;
+      console.info(`\n${text}`);
+      // Also appended to .data/dev-mail.log (gitignored): a local mailbox for development.
+      try {
+        const { appendFile, mkdir } = await import('node:fs/promises');
+        const dir = `${process.cwd()}/.data`;
+        await mkdir(dir, { recursive: true });
+        await appendFile(`${dir}/dev-mail.log`, text);
+      } catch {
+        // The console copy is enough.
+      }
       return;
     }
     throw new Error('Email delivery is not configured.');

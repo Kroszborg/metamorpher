@@ -46,7 +46,7 @@ export function KpiTile({
     const flat = Math.abs(diff) < 0.5;
     const up = diff > 0;
     delta = (
-      <span className={cn('inline-flex items-center gap-1', flat ? 'text-muted-foreground' : up ? 'text-success' : 'text-destructive')}>
+      <span className={cn('inline-flex flex-wrap items-center gap-x-1', flat ? 'text-muted-foreground' : up ? 'text-success' : 'text-destructive')}>
         {flat ? null : (
           <HugeiconsIcon icon={up ? ArrowUpRight01Icon : ArrowDownRight01Icon} strokeWidth={2} className="size-3.5" />
         )}
@@ -61,7 +61,7 @@ export function KpiTile({
     <div className="flex min-w-0 flex-col gap-1 rounded-xl border bg-card p-4">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="font-sans text-2xl font-semibold tracking-tight">{value}</span>
-      <span className="truncate text-xs">{delta}</span>
+      <span className="text-xs/snug">{delta}</span>
     </div>
   );
 }

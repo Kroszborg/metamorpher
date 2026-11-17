@@ -9,11 +9,12 @@ const full = new Intl.NumberFormat();
 const dayFmt = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const label = (day: string) => dayFmt.format(new Date(`${day}T00:00:00Z`));
 
+/** Top of the y-axis: four equal steps of 1, 2 or 5 × 10^k, so every tick is a round number. */
 function niceMax(v: number): number {
-  if (v <= 4) return 4;
-  const pow = 10 ** Math.floor(Math.log10(v));
-  for (const m of [1, 2, 2.5, 5, 10]) if (m * pow >= v) return m * pow;
-  return 10 * pow;
+  const raw = Math.max(v, 4) / 4;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * pow).find((s) => s >= raw) ?? 10 * pow;
+  return step * 4;
 }
 
 /**
@@ -63,7 +64,8 @@ export function LineChart({
     setHover(Math.min(days.length - 1, Math.max(0, i)));
   };
 
-  const tipLeft = hover === null ? 0 : Math.min(Math.max(x(hover) - 80, 0), width - 168);
+  // Beside the crosshair, on the side with room, so it never covers the hovered point.
+  const tipLeft = hover === null ? 0 : x(hover) > width / 2 ? Math.max(0, x(hover) - 180) : Math.min(width - 168, x(hover) + 12);
 
   return (
     <figure className="flex flex-col gap-3">
