@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { DrawnCheck } from '@/components/ui/drawn-check';
 import { api } from '@/lib/account/api';
 import { ACCOUNTS_MAIL } from '@/lib/account/flags';
 import { afterSignIn } from '@/lib/account/session';
@@ -17,6 +18,7 @@ export function SignInForm() {
   const [error, setError] = useState<string | null>(null);
   const [unverified, setUnverified] = useState(false);
   const [resent, setResent] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -33,6 +35,7 @@ export function SignInForm() {
       setError(r.status === 401 ? 'That email and password do not match an account.' : r.message);
       return;
     }
+    setSignedIn(true); // presentation only: the button confirms while we redirect
     await afterSignIn();
     router.push(nextPath());
   };
@@ -94,8 +97,22 @@ export function SignInForm() {
           ) : (
             <span />
           )}
-          <Button type="submit" size="lg" className="h-9 px-4 text-sm" disabled={busy || !email || !password}>
-            {busy ? 'Signing in…' : 'Sign in'}
+          <Button
+            type="submit"
+            size="lg"
+            className={signedIn ? 'h-9 px-4 text-sm disabled:opacity-100' : 'h-9 px-4 text-sm'}
+            disabled={busy || !email || !password}
+          >
+            {signedIn ? (
+              <span key="ok" className="inline-flex animate-fade items-center gap-1.5">
+                <DrawnCheck className="size-4" strokeWidth={2.25} />
+                Signed in
+              </span>
+            ) : busy ? (
+              'Signing in…'
+            ) : (
+              'Sign in'
+            )}
           </Button>
         </div>
       </form>

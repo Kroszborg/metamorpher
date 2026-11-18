@@ -16,6 +16,7 @@ import { useLocalModel } from '@/components/ai/use-local-model';
 import { SectionCard } from '@/components/kit/section-card';
 import { PdfStage, SwitchRow } from '@/components/pdf-stage';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Dropzone } from '@/components/workbench';
 import { localAi } from '@/engines/ai';
@@ -511,7 +512,7 @@ export default function ChatWithPdf({ tool }: ToolProps) {
                 )}
               </div>
               <label className="flex items-center gap-2 text-[0.7rem] text-muted-foreground">
-                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+                <Checkbox checked={remember} onCheckedChange={(v) => setRemember(v === true)} />
                 Remember this chat on this device
               </label>
             </form>

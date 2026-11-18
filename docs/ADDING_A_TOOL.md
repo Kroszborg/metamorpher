@@ -300,6 +300,40 @@ For tools that build a document from a form (invoice, receipt, résumé):
 The first render of a tool also happens on the server: keep it deterministic (no random ids in DOM
 attributes, no dates from the clock). Fill dates and restore browser storage in a mount effect.
 
+### Viewers (`src/components/viewer`)
+
+The "View & play" tools only read files. Each is a one-line tool around `ViewerFrame`:
+
+```tsx
+<ViewerFrame tool={tool} kinds={['table']} as="table" intro="What it shows." />
+```
+
+- `sniffFile(file)` (`sniff.ts`) reads at most 128 KB and says what the file **is**, from magic bytes and
+  text shape, with the extension only as a tie-breaker: a `ViewKind` (`table`, `data`, `text`,
+  `markdown`, `hex`, `pdf`, `document`, `image`, `video`, `audio`, `archive`, `font`, `sqlite`,
+  `subtitle`), a format name, the canonical extension and MIME type, the guessed text encoding,
+  `mismatch` (the name says otherwise) and `unsupported` (recognised but not viewable: 7z, RAR, .doc).
+- `ViewerFrame` owns drop/browse/paste, the info bar, fullscreen, file switching, "View as", the
+  shortcut help and the "Open with" strip. `kinds` are the kinds the tool is about (others get a
+  pointer to the right viewer); `as` forces a viewer for accepted text files (or any file, for `hex`).
+- `KindViewer` (`viewers.tsx`) lazy-loads one chunk per viewer; each receives `ViewerProps`
+  (`file`, `sniff`, `files`, `index`, `onIndex`). Viewers register their keys with
+  `useShortcuts(list)` (shown in the help) and handle them with `useKeys(handler)`, which stays quiet
+  while someone types or a menu is open. `useVirtualScroll` scrolls content taller than browsers allow
+  (millions of rows) and is what the grid, tree, hex and archive lists use.
+- `toolsFor(file, sniff)` lists every available tool whose `accept` matches the file or what it really
+  is; `handOff(slug, files, navigate, VIEWER_SLUGS)` moves files to another page in memory: viewers take
+  them with `takeHandoff`, any other tool receives them as a paste on its drop zone. The home page uses
+  the same pieces (`HomeDrop`).
+- Heavy work lives in per-viewer workers: `table/table.worker.ts` (streaming CSV parser on UTF-8 bytes,
+  one byte pool per column, sort, filter, search, stats, export) and `data/data.worker.ts` (JSON, YAML,
+  TOML, XML and NDJSON as a flat node table) and `sqlite/sqlite.worker.ts` (sql.js, MIT, ~0.7 MB wasm from
+  `/vendor/sqljs`, opened with `PRAGMA query_only`). Pure parts (`table/engine.ts`, `data/tree.ts`,
+  `archive/formats.ts`) run in Node too, for benchmarks.
+- To add a viewer: write `src/components/viewer/<kind>/<name>.tsx` (default export taking
+  `ViewerProps`), point its kind at it in `viewers.tsx`, set its tool in `kinds.ts`, and register a
+  tool folder that renders `ViewerFrame`.
+
 ### Workflow steps (`src/tools/workflow-builder/steps.ts`)
 
 The workflow builder runs a list of `PipelineStep`s as one batch `Job`: each step's outputs become the

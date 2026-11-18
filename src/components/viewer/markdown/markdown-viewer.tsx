@@ -89,6 +89,10 @@ export default function MarkdownViewer({ file, sniff }: ViewerProps) {
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>('preview');
   const [outline, setOutline] = useState(true);
+  // On narrow screens the outline covers the page: start with it closed.
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches) queueMicrotask(() => setOutline(false));
+  }, []);
   const [active, setActive] = useState<string | null>(null);
   const body = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);

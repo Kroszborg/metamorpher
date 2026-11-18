@@ -5,11 +5,13 @@ import { HomeSavedTools } from '@/components/tools/saved-tools';
 import { SearchHero } from '@/components/tools/search-hero';
 import { ToolIcon } from '@/components/tools/tool-card';
 import { CategorySections } from '@/components/tools/tool-grid';
+import { HomeDrop } from '@/components/viewer/home-drop';
 import { SOURCE_URL } from '@/lib/site';
 import { AVAILABLE_TOOLS, getAvailableTool } from '@/tools/registry';
 
 /** The most common jobs, with short labels. Missing or unshipped slugs are skipped. */
 const QUICK_PICKS: [slug: string, label: string][] = [
+  ['open-file', 'Open any file'],
   ['merge-pdf', 'Merge PDF'],
   ['compress-pdf', 'Compress PDF'],
   ['convert-image', 'Convert image'],
@@ -88,6 +90,7 @@ export default function Home() {
             </li>
           ))}
         </ul>
+        <HomeDrop />
       </section>
 
       <div className="page-container">

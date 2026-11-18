@@ -2,6 +2,8 @@
 
 import { Tabs as TabsPrimitive } from 'radix-ui';
 import type * as React from 'react';
+import { useRef } from 'react';
+import { useSlidingIndicator } from './sliding-indicator';
 
 import { cn } from '@/lib/utils';
 
@@ -15,16 +17,31 @@ function Tabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive
   );
 }
 
-function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
+function TabsList({ className, ref, children, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
+  const list = useRef<HTMLDivElement | null>(null);
+  // The active tab's card slides between tabs (follows Radix's data-state changes).
+  const indicator = useSlidingIndicator(list, null, {
+    selector: '[data-slot="tabs-trigger"][data-state="active"]',
+    watch: true,
+    className: 'bg-card shadow-sm',
+  });
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
+      ref={(el) => {
+        list.current = el;
+        if (typeof ref === 'function') ref(el);
+        else if (ref) ref.current = el;
+      }}
       className={cn(
-        'inline-flex h-8 w-fit items-center justify-center gap-1 rounded-lg bg-muted p-1 text-muted-foreground',
+        'group/tabs relative inline-flex h-8 w-fit items-center justify-center gap-1 rounded-lg bg-muted p-1 text-muted-foreground',
         className,
       )}
       {...props}
-    />
+    >
+      {indicator}
+      {children}
+    </TabsPrimitive.List>
   );
 }
 
@@ -33,7 +50,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "inline-flex h-6 flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs/relaxed font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "relative z-[1] inline-flex h-6 flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs/relaxed font-medium whitespace-nowrap transition-[color,background-color,box-shadow,scale] duration-(--dur-2) outline-none select-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm group-data-[indicator-ready]/tabs:data-[state=active]:bg-transparent group-data-[indicator-ready]/tabs:data-[state=active]:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
         className,
       )}
       {...props}

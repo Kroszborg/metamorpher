@@ -42,6 +42,7 @@ export function ToolCard({
   return (
     <div
       data-slot="card"
+      data-vt-key={tool.slug}
       className={cn(
         'group relative flex min-w-0 items-start gap-3 rounded-xl p-3 transition-colors hover:bg-muted/70 has-[a:focus-visible]:bg-muted/70 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring',
         className,

@@ -51,11 +51,14 @@ export function Field({
         id={id}
         aria-invalid={error ? true : undefined}
         aria-describedby={hint || error ? `${id}-hint` : undefined}
-        className={inputClass}
+        className={cn(inputClass, 'aria-invalid:animate-shake')}
         {...props}
       />
       {error || hint ? (
-        <p id={`${id}-hint`} className={cn('text-xs/relaxed', error ? 'text-destructive' : 'text-muted-foreground')}>
+        <p
+          id={`${id}-hint`}
+          className={cn('text-xs/relaxed', error ? 'animate-fade text-destructive' : 'text-muted-foreground')}
+        >
           {error ?? hint}
         </p>
       ) : null}
@@ -118,6 +121,8 @@ export function Notice({
       role={kind === 'error' ? 'alert' : 'status'}
       className={cn(
         'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 text-sm/relaxed',
+        // An error shakes once as it appears; other notices settle in.
+        kind === 'error' ? 'animate-shake' : 'animate-enter',
         kind === 'error' && 'border-destructive/30 bg-destructive/10 text-destructive',
         kind === 'success' && 'border-success/30 bg-success/10 text-foreground',
         kind === 'info' && 'bg-muted/60 text-foreground',
@@ -127,7 +132,11 @@ export function Notice({
       <HugeiconsIcon
         icon={kind === 'error' ? Alert02Icon : CheckmarkCircle02Icon}
         strokeWidth={2}
-        className={cn('mt-0.5 size-4 shrink-0', kind === 'success' && 'text-success', kind === 'info' && 'text-primary')}
+        className={cn(
+          'mt-0.5 size-4 shrink-0',
+          kind === 'success' && 'animate-pop text-success [animation-delay:120ms]',
+          kind === 'info' && 'text-primary',
+        )}
       />
       <div className="min-w-0 flex-1">{children}</div>
     </div>

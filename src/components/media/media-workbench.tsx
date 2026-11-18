@@ -5,7 +5,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import type * as React from 'react';
 import { SectionCard } from '@/components/kit/section-card';
 import { Button } from '@/components/ui/button';
-import { Dropzone, FileList, type InputFile, type Job, Results, RunBar, useWorkbench } from '@/components/workbench';
+import { Dropzone, FileList, type InputFile, type Job, Results, RunBar, runOutcome, useWorkbench } from '@/components/workbench';
 import { EngineLog } from './engine-log';
 import type { JobLog } from './job-log';
 
@@ -110,6 +110,7 @@ export function MediaWorkbench<O>({
             label={runLabel}
             running={wb.running}
             progress={wb.progress}
+            outcome={runOutcome(wb)}
             note={wb.note}
             disabledReason={disabledReason}
             onRun={() => {

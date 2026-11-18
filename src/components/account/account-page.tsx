@@ -11,9 +11,11 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type FormEvent, useCallback, useEffect, useState } from 'react';
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { DangerMark } from '@/components/kit/confirm-dialog';
 import { EmptyState } from '@/components/kit/empty-state';
+import { HoldButton } from '@/components/kit/hold-button';
 import { PageHeader } from '@/components/kit/page-header';
 import { SectionCard } from '@/components/kit/section-card';
 import { StatusBadge } from '@/components/kit/status-badge';
@@ -329,6 +331,8 @@ function DeleteAccount() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const held = useRef(false);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -351,14 +355,26 @@ function DeleteAccount() {
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="w-[calc(100%-2rem)]">
-          <form onSubmit={submit} className="flex flex-col gap-4">
-            <DialogHeader>
-              <DialogTitle>Delete your account?</DialogTitle>
-              <DialogDescription className="text-sm/relaxed">
-                This permanently deletes your account, synced tools, history and chat conversations, and signs out every
-                device. Starred tools and chats saved in this browser stay here. This cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
+          <form
+            ref={form}
+            onSubmit={(e) => {
+              // Only the hold-to-confirm button submits (Enter in the field does not skip the hold).
+              if (!held.current) return e.preventDefault();
+              held.current = false;
+              void submit(e);
+            }}
+            className="flex flex-col gap-4"
+          >
+            <div className="flex items-start gap-3.5">
+              <DangerMark />
+              <DialogHeader className="min-w-0 flex-1 pt-0.5">
+                <DialogTitle>Delete your account?</DialogTitle>
+                <DialogDescription className="text-sm/relaxed">
+                  This permanently deletes your account, synced tools, history and chat conversations, and signs out
+                  every device. Starred tools and chats saved in this browser stay here. This cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+            </div>
             {error ? <Notice kind="error">{error}</Notice> : null}
             <PasswordField
               label="Enter your password to confirm"
@@ -370,9 +386,16 @@ function DeleteAccount() {
               <Button type="button" variant="outline" size="lg" className="h-9" onClick={() => setOpen(false)}>
                 Keep account
               </Button>
-              <Button type="submit" variant="destructive" size="lg" className="h-9" disabled={busy || !password}>
-                {busy ? 'Deleting…' : 'Delete everything'}
-              </Button>
+              <HoldButton
+                className="h-9 text-sm"
+                disabled={busy || !password}
+                onConfirm={() => {
+                  held.current = true;
+                  form.current?.requestSubmit();
+                }}
+              >
+                {busy ? 'Deleting…' : 'Hold to delete everything'}
+              </HoldButton>
             </DialogFooter>
           </form>
         </DialogContent>

@@ -10,6 +10,7 @@ import { Wordmark } from '@/components/brand';
 import { CommandTrigger } from '@/components/command-palette';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DUR } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getAvailableTool } from '@/tools/registry';
 import { MenuPanel } from './menu-panel';
@@ -62,6 +63,19 @@ function DesktopMenus({ pathname }: { pathname: string }) {
     setLastPath(pathname);
     setOpenId(null);
   }
+
+  // A menu that closes (rather than switching to a neighbour) fades out briefly.
+  const [prevOpenId, setPrevOpenId] = useState(openId);
+  const [closingId, setClosingId] = useState<string | null>(null);
+  if (openId !== prevOpenId) {
+    setPrevOpenId(openId);
+    setClosingId(openId === null ? prevOpenId : null);
+  }
+  useEffect(() => {
+    if (!closingId) return;
+    const t = setTimeout(() => setClosingId(null), DUR[2]);
+    return () => clearTimeout(t);
+  }, [closingId]);
 
   useEffect(() => {
     if (!openId) return;
@@ -128,16 +142,27 @@ function DesktopMenus({ pathname }: { pathname: string }) {
                   className={cn('size-3.5 transition-transform', open && 'rotate-180')}
                 />
               </button>
-              {open ? (
+              {open || closingId === g.id ? (
                 <>
                   <div
                     aria-hidden
                     onClick={close}
-                    className="fixed inset-x-0 top-14 bottom-0 bg-background/70 backdrop-blur-[2px] motion-safe:animate-in motion-safe:fade-in-0"
+                    className={cn(
+                      'fixed inset-x-0 top-14 bottom-0 bg-background/70 backdrop-blur-[2px]',
+                      open
+                        ? 'duration-(--dur-2) motion-safe:animate-in motion-safe:fade-in-0'
+                        : 'pointer-events-none fill-mode-forwards duration-(--dur-2) motion-safe:animate-out motion-safe:fade-out-0 motion-reduce:hidden',
+                    )}
                   />
                   <div
-                    id={panelId}
-                    className="scroll-slim absolute inset-x-0 top-full max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-y bg-popover shadow-[0_32px_64px_-32px_rgb(0_0_0/0.5)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1"
+                    id={open ? panelId : undefined}
+                    inert={!open}
+                    className={cn(
+                      'scroll-slim absolute inset-x-0 top-full max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-y bg-popover shadow-[0_32px_64px_-32px_rgb(0_0_0/0.5)]',
+                      open
+                        ? 'ease-enter duration-(--dur-3) motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-top-1'
+                        : 'pointer-events-none fill-mode-forwards ease-exit duration-(--dur-2) motion-safe:animate-out motion-safe:fade-out-0 motion-safe:slide-out-to-top-1 motion-reduce:hidden',
+                    )}
                   >
                     <div className="page-container py-7">
                       <MenuPanel group={g} onNavigate={close} />

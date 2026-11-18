@@ -134,6 +134,8 @@ function viewChoices(s: Sniffed): ViewKind[] {
   const textual = s.encoding !== undefined;
   const list: ViewKind[] = [s.kind];
   if (textual) list.push('text', 'table', 'data', 'markdown');
+  // ZIP-based formats (DOCX, XLSX, EPUB, ODF, JAR…) can be opened as the archive they are.
+  if (/zip|openxmlformats|opendocument|epub|comicbook/.test(s.mime)) list.push('archive');
   list.push('hex');
   return [...new Set(list)];
 }

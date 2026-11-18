@@ -10,6 +10,7 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useId, useState } from 'react';
+import { ConfirmDialog } from '@/components/kit/confirm-dialog';
 import { SectionCard } from '@/components/kit/section-card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +32,7 @@ import { LocalModelsSection } from './local-models';
 export function AiSettingsPanel({ compact = false }: { compact?: boolean }) {
   const settings = useAiSettings();
   const configured = PROVIDER_IDS.filter((id) => isConfigured(settings.providers[id], id));
+  const [confirmClear, setConfirmClear] = useState(false);
 
   return (
     <div className="flex flex-col gap-4">
@@ -58,18 +60,20 @@ export function AiSettingsPanel({ compact = false }: { compact?: boolean }) {
           <span>
             {configured.length} provider{configured.length === 1 ? '' : 's'} set up.
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (window.confirm('Remove every saved API key and AI setting from this browser?')) clearAiSettings();
-            }}
-          >
+          <Button variant="ghost" size="sm" onClick={() => setConfirmClear(true)}>
             <HugeiconsIcon icon={Delete02Icon} strokeWidth={2} />
             Remove all keys
           </Button>
         </div>
       ) : null}
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Remove all keys?"
+        body="Every saved API key and AI setting is removed from this browser. Downloaded on-device models stay."
+        action="Remove keys"
+        onConfirm={clearAiSettings}
+      />
 
       {compact ? null : <LocalModelsSection />}
     </div>

@@ -14,10 +14,10 @@ const PdfReader = lazy(() => import('./pdf/pdf-reader'));
 const DocumentViewer = lazy(() => import('./document/document-viewer'));
 const ImageViewer = lazy(() => import('./image/image-viewer'));
 const MediaViewer = lazy(() => import('./media/media-viewer'));
-const ArchiveViewer = lazy(() => import('./hex/hex-viewer'));
-const FontViewer = lazy(() => import('./hex/hex-viewer'));
-const SqliteViewer = lazy(() => import('./hex/hex-viewer'));
-const SubtitleViewer = lazy(() => import('./text/text-viewer'));
+const ArchiveViewer = lazy(() => import('./archive/archive-viewer'));
+const FontViewer = lazy(() => import('./font/font-viewer'));
+const SqliteViewer = lazy(() => import('./sqlite/sqlite-viewer'));
+const SubtitleViewer = lazy(() => import('./subtitle/subtitle-viewer'));
 
 /** The viewer for `kind`, loaded on demand (wrap in Suspense). */
 export function KindViewer({ kind, ...props }: ViewerProps & { kind: ViewKind }) {

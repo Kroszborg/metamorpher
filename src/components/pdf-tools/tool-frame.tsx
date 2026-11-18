@@ -5,7 +5,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import type * as React from 'react';
 import { SectionCard } from '@/components/kit/section-card';
 import { Button } from '@/components/ui/button';
-import { Dropzone, FileList, RunBar, type WorkbenchState } from '@/components/workbench';
+import { Dropzone, FileList, RunBar, runOutcome, type WorkbenchState } from '@/components/workbench';
 
 /**
  * The workbench layout (files left, options and run bar right) with the
@@ -103,6 +103,7 @@ export function ToolFrame({
             label={runLabel}
             running={wb.running}
             progress={wb.progress}
+            outcome={runOutcome(wb)}
             note={wb.note}
             disabledReason={reason}
             onRun={wb.run}

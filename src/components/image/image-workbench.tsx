@@ -12,6 +12,7 @@ import {
   type Job,
   Results,
   RunBar,
+  runOutcome,
   useWorkbench,
   type WorkbenchState,
 } from '@/components/workbench';
@@ -107,6 +108,7 @@ export function ImageWorkbench<O>({
             label={runLabel}
             running={wb.running}
             progress={wb.progress}
+            outcome={runOutcome(wb)}
             note={wb.note}
             disabledReason={disabledReason}
             onRun={() => {
