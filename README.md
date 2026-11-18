@@ -5,7 +5,7 @@ and work with PDFs without uploading anything: every file is processed on your d
 
 ## Tools
 
-92 tools are available now; the list lives in
+100 tools are available now; the list lives in
 [`src/tools/registry.ts`](src/tools/registry.ts).
 
 | Area | Tools | Engines |
@@ -17,7 +17,7 @@ and work with PDFs without uploading anything: every file is processed on your d
 | Convert to PDF | Images, Markdown, HTML, text, CSV, Word (.docx, layout approximated: headers, footers, page numbers, tab stops, footnotes), PowerPoint (.pptx: one page per slide with real text; charts not drawn), Excel/ODS, EPUB/FB2/MOBI to PDF; create a PDF; convert document | pdf-lib, MuPDF HTML layout with Noto fonts (selectable text, bookmarks), SheetJS CE |
 | Convert from PDF | PDF to JPG/PNG, TIFF, text, Word, HTML and EPUB (tables and multi-column pages), Excel (ruled and aligned tables, wrapped cells joined), PowerPoint (editable text over the page graphics, or page pictures); extract images; PDF to audio (read aloud with system voices, or MP3/WAV with an on-device voice) | pdf.js, MuPDF, SheetJS CE, Kokoro-82M |
 | Image | Convert, compress, resize, crop, HEIC to JPG, strip EXIF, SVG to PNG, favicon/ICO; remove background and upscale 2×/4× (on-device models) | jSquash codecs (MozJPEG, oxipng, libwebp, libavif), heic-to; ORMBG / BiRefNet lite / MODNet, Swin2SR |
-| Audio and video | Convert video, convert audio, compress video, trim and cut, extract audio, mute, video to GIF, GIF to video, change speed, merge clips | Mediabunny (WebCodecs), ffmpeg.wasm fallback |
+| Audio and video | Convert video, convert audio, compress video, trim and cut (also AVI, WMV, FLV, MPEG, OGV, 3GP, WMA), extract audio, mute, video to GIF, GIF to video, change speed, merge clips, adjust volume (LUFS normalise, gain, fades), rotate & crop, resize for social media, video to images | Mediabunny (WebCodecs), ffmpeg.wasm fallback |
 | AI | Chat with PDF (answers with page citations; PDF, Word, Markdown, text), summarize PDF (short, detailed, bullets, per chapter), transcribe audio and video (TXT/SRT/VTT) | Transformers.js + ONNX Runtime Web (WebGPU or WASM): Qwen2.5 / SmolLM2, all-MiniLM-L6-v2, Whisper; or your own API key for Anthropic, OpenAI, Gemini, Groq, OpenRouter or an OpenAI-compatible server (Ollama, LM Studio) |
 | Business and everyday | Invoice generator (India GST: GSTIN check, CGST+SGST/UTGST or IGST, HSN summary, amount in words with lakh/crore, UPI QR; or any currency), POS receipts (58/80 mm PDF and PNG cut to length), résumé builder (form with four ATS-friendly templates, or real LaTeX with five templates compiled in the browser), text to handwriting, whiteboard, QR codes and barcodes (make and read) | typeset (MuPDF HTML layout), BusyTeX (TeX Live 2026 pdfLaTeX in WebAssembly), CodeMirror 6, uqr, jsQR, JsBarcode, perfect-freehand |
 | Share and automate | P2P file share (WebRTC data channel, codes copied or scanned, no server), workflow builder (chain images to PDF, merge, rotate, page numbers, watermark, compress, encrypt, image resize/convert, ZIP) | WebRTC, the engines above |

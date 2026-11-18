@@ -55,7 +55,8 @@ export function useKeys(handler: (e: KeyboardEvent) => boolean | void, enabled =
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || isTypingTarget(e.target)) return;
-      if (document.querySelector('[role="dialog"]:not([data-viewer-panel]), [role="menu"], [role="listbox"]')) return;
+      // An open dialog, menu or pop-up list owns the keyboard.
+      if (document.querySelector('[role="dialog"]:not([data-viewer-panel]), [role="menu"], [data-radix-popper-content-wrapper]')) return;
       if (handler(e) === true) e.preventDefault();
     };
     document.addEventListener('keydown', onKey);

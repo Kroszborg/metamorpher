@@ -135,6 +135,12 @@ function zipKind(head: Uint8Array, tail: Uint8Array, own: string): Guess {
   if (names.includes('ppt/presentation.xml') || names.includes('ppt/_rels'))
     return g('document', 'PowerPoint presentation', 'pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation');
   if (names.includes('META-INF/container.xml') && own === 'epub') return g('document', 'EPUB e-book', 'epub', 'application/epub+zip');
+  // ODF written without "mimetype" first: the manifest names the type.
+  if (names.includes('application/vnd.oasis.opendocument.spreadsheet'))
+    return g('table', 'OpenDocument spreadsheet', 'ods', 'application/vnd.oasis.opendocument.spreadsheet');
+  if (names.includes('application/vnd.oasis.opendocument.text'))
+    return g('document', 'OpenDocument text', 'odt', 'application/vnd.oasis.opendocument.text');
+  if (names.includes('application/epub+zip')) return g('document', 'EPUB e-book', 'epub', 'application/epub+zip');
   if (own === 'cbz') return g('archive', 'Comic book archive', 'cbz', 'application/vnd.comicbook+zip');
   return g('archive', 'ZIP archive', 'zip', 'application/zip');
 }
@@ -145,6 +151,8 @@ function mp3Frame(b: Uint8Array, o: number): boolean {
 
 function binaryGuess(b: Uint8Array, tail: Uint8Array, own: string): Guess | null {
   if (b.length === 0) return null;
+  // Text byte-order marks first: FF FE would otherwise pass for an MP3 frame header.
+  if ((b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff) || (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf)) return null;
   if (ascii(b, 0, 5) === '%PDF-' || (b.length > 1024 && ascii(b, 0, 1024).includes('%PDF-')))
     return g('pdf', 'PDF document', 'pdf', 'application/pdf');
   if (starts(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {

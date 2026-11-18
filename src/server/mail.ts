@@ -1,5 +1,5 @@
 import 'server-only';
-import { mailConfigured, serverConfig } from './config';
+import { mailConfigured, serverConfig, smtpConfigured } from './config';
 import { SITE_NAME } from '@/lib/site';
 
 type Mail = { to: string; subject: string; intro: string; action: string; url: string; outro: string };
@@ -20,7 +20,8 @@ function render(m: Mail) {
 }
 
 /**
- * Sends a transactional email through Resend's HTTP API. Without a key, in
+ * Sends a transactional email over SMTP (for example Gmail with an app password) or,
+ * failing that, through Resend's HTTP API. Without a key, in
  * development, the link is printed to the server console instead. Message
  * bodies and API keys are never logged.
  */
@@ -43,6 +44,26 @@ async function send(m: Mail): Promise<void> {
     throw new Error('Email delivery is not configured.');
   }
   const { text, html } = render(m);
+  if (smtpConfigured) {
+    try {
+      const { createTransport } = await import('nodemailer');
+      const transport = createTransport({
+        host: serverConfig.smtpHost,
+        port: serverConfig.smtpPort,
+        secure: serverConfig.smtpPort === 465,
+        auth: { user: serverConfig.smtpUser!, pass: serverConfig.smtpPass! },
+        connectionTimeout: 10_000,
+        socketTimeout: 15_000,
+      });
+      await transport.sendMail({ from: serverConfig.emailFrom!, to: m.to, subject: m.subject, text, html });
+    } catch (err) {
+      // Code only: the message can echo addresses.
+      const code = (err as { code?: string; responseCode?: number }).code ?? (err as { responseCode?: number }).responseCode;
+      console.error(`[mail] SMTP refused a "${m.subject}" email (${code ?? 'unknown error'}).`);
+      throw new Error('The email could not be sent.');
+    }
+    return;
+  }
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${serverConfig.resendKey}`, 'Content-Type': 'application/json' },

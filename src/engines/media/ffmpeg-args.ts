@@ -6,7 +6,7 @@
  */
 import { gifArgs } from '@/engines/ffmpeg/presets';
 import { CONTAINERS, audioBitrateWanted, audioCodecLabel, formatBitrate, planAudioBitrate, planVideo } from './presets';
-import type { ConvertRequest, GifRequest, MediaInfo, MergeRequest } from './types';
+import type { AudioLevel, ConvertRequest, GifRequest, MediaInfo, MergeRequest, VideoTransform } from './types';
 
 export type FfmpegPlan = {
   /** Arguments before `-i <input>` (input seeking). */
@@ -113,15 +113,20 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
   } else {
     const vr = req.video ?? {};
     const copy =
-      !speed && !vr.maxShortSide && !vr.maxFps && !vr.bitrate &&
-      (vr.quality === 'copy' || fastTrim) &&
+      !speed && !vr.maxShortSide && !vr.maxFps && !vr.bitrate && !vr.transform &&
+      ((vr.quality === 'copy' && !req.trim?.accurate) || fastTrim) &&
       (copyFits(req.container, info?.video?.codec, 'video') || (sameContainer && (!info || info.engine === 'ffmpeg')));
     if (copy) {
       post.push('-c:v', 'copy');
       video = 'Copied without re-encoding';
     } else {
-      const filters = [scaleFilter(vr.maxShortSide)];
-      if (speed) filters.push(`setpts=PTS/${speed.factor}`);
+      const filters = vr.transform ? transformFilters(vr.transform) : [scaleFilter(vr.maxShortSide)];
+      if (speed) {
+        // An explicit fps filter (not -fpsmax) picks the frames for a speed-up; -fpsmax shifted the picture
+        // two frames late against the sound (measured).
+        filters.push(`setpts=(PTS-STARTPTS)/${speed.factor}`);
+        if (speed.factor > 1 && info?.video?.fps) filters.push(`fps=${Math.round(info.video.fps * 1000) / 1000}`);
+      }
       const plan = info?.video ? planVideo(info.video, 'avc', vr) : null;
       if (plan?.cappedAt) notes.push(`Video bitrate held at the source's ${formatBitrate(plan.cappedAt)}.`);
       const quality = vr.quality ?? 'balanced';
@@ -152,9 +157,13 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
         }
         if (vr.codec && vr.codec !== 'auto' && vr.codec !== 'avc') notes.push(`The software engine writes H.264 instead of ${vr.codec.toUpperCase()}.`);
       }
+      if (info?.video?.hdr) {
+        // The software encoders write 8-bit SDR: tone-map to BT.709 rather than leave PQ/HLG values to look washed out.
+        filters.unshift('zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p');
+        notes.push(`This HDR video (${info.video.hdr === 'pq' ? 'HDR10 / PQ' : 'HLG'}) was tone-mapped to standard range (SDR, BT.709), since the software engine writes 8-bit video.`);
+      }
       post.push('-vf', filters.join(','));
       if (vr.maxFps) post.push('-fpsmax', String(vr.maxFps));
-      if (speed && speed.factor > 1 && info?.video?.fps) post.push('-fpsmax', String(Math.round(info.video.fps)));
     }
   }
 
@@ -164,7 +173,7 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
     post.push('-an');
   } else {
     const ar = req.audio ?? {};
-    const copy = !speed && !ar.sampleRate && !ar.channels && (ar.bitrate === 'copy' || fastTrim) &&
+    const copy = !speed && !ar.sampleRate && !ar.channels && !ar.level && ((ar.bitrate === 'copy' && !req.trim?.accurate) || fastTrim) &&
       (copyFits(req.container, info?.audio?.codec, 'audio') || (sameContainer && (!info || info.engine === 'ffmpeg')));
     if (copy) {
       post.push('-c:a', 'copy');
@@ -178,6 +187,11 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
       post.push(...enc.args);
       if (ar.sampleRate) post.push('-ar', String(ar.sampleRate));
       if (ar.channels) post.push('-ac', String(ar.channels));
+      if (ar.level && !speed) {
+        const af = levelFilters(ar.level, info?.duration ?? 0);
+        if (af.filters.length) post.push('-af', af.filters.join(','));
+        notes.push(...af.notes);
+      }
       if (speed) {
         const sr = info?.audio?.sampleRate;
         if (speed.keepPitch || !sr) {
@@ -194,6 +208,44 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
   if (req.container === 'mp4' || req.container === 'mov' || req.container === 'm4a') post.push('-movflags', '+faststart');
   post.push('-map_metadata', '0');
   return { pre, post, ext: c.ext, video, audio, notes };
+}
+
+/** ffmpeg filters for a picture transform (ffmpeg has already applied the file's own rotation). */
+function transformFilters(tf: VideoTransform): string[] {
+  const f: string[] = [];
+  if (tf.rotate === 90) f.push('transpose=clock');
+  else if (tf.rotate === 180) f.push('hflip,vflip');
+  else if (tf.rotate === 270) f.push('transpose=cclock');
+  if (tf.flipHorizontal) f.push('hflip');
+  if (tf.flipVertical) f.push('vflip');
+  if (tf.crop) f.push(`crop=${Math.round(tf.crop.width / 2) * 2}:${Math.round(tf.crop.height / 2) * 2}:${Math.round(tf.crop.left)}:${Math.round(tf.crop.top)}`);
+  if (tf.frame) {
+    const { width: w, height: h } = tf.frame;
+    f.push(
+      tf.frame.fit === 'cover'
+        ? `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`
+        : `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`,
+    );
+  }
+  f.push('scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1');
+  return f;
+}
+
+/** ffmpeg filters for a level request. Normalising here is ffmpeg's one-pass loudnorm (it adapts the gain as it goes). */
+function levelFilters(level: AudioLevel, duration: number): { filters: string[]; notes: string[] } {
+  const filters: string[] = [];
+  const notes: string[] = [];
+  const ceiling = level.peakCeiling ?? -1;
+  if (level.normalize !== undefined) {
+    filters.push(`loudnorm=I=${level.normalize}:TP=${ceiling}:LRA=11`);
+    notes.push(`The software engine normalised with ffmpeg's one-pass loudnorm towards ${level.normalize} LUFS: it adjusts the gain gradually through the file rather than applying one fixed gain.`);
+  } else if (level.gainDb) {
+    filters.push(`volume=${level.gainDb}dB`, `alimiter=limit=${(10 ** (ceiling / 20)).toFixed(4)}:level=false`);
+    notes.push(`Gain ${level.gainDb >= 0 ? '+' : ''}${level.gainDb} dB; peaks above ${ceiling} dBFS are limited by the software engine.`);
+  }
+  if (level.fadeIn) filters.push(`afade=t=in:d=${level.fadeIn}:curve=qsin`);
+  if (level.fadeOut && duration > 0) filters.push(`afade=t=out:st=${Math.max(0, duration - level.fadeOut).toFixed(3)}:d=${level.fadeOut}:curve=qsin`);
+  return { filters, notes };
 }
 
 export function gifPlanArgs(req: GifRequest): FfmpegPlan {

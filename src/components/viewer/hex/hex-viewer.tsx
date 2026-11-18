@@ -71,7 +71,13 @@ function unixTime(s: number): string {
 
 export default function HexViewer({ file }: ViewerProps) {
   const [, bump] = useReducer((n: number) => n + 1, 0);
-  const source = useMemo(() => new ByteSource(file, bump), [file]);
+  const source = useMemo(() => new ByteSource(file), [file]);
+  // Pages load asynchronously; re-render once they arrive (only while mounted).
+  useEffect(() => {
+    const stop = source.listen(bump);
+    bump();
+    return stop;
+  }, [source]);
   const scroller = useRef<HTMLDivElement>(null);
   const [perRow, setPerRow] = useState(16);
   const rows = Math.max(1, Math.ceil(file.size / perRow));

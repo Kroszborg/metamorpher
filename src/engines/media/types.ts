@@ -52,6 +52,8 @@ export type VideoInfo = {
   width: number;
   height: number;
   rotation: 0 | 90 | 180 | 270;
+  /** High dynamic range transfer (HDR10/PQ or HLG), null for SDR or unknown. */
+  hdr?: 'pq' | 'hlg' | null;
   /** Best-guess frame rate, or null when it could not be measured. */
   fps: number | null;
   /** Average bits per second, measured from the packets when the file does not say. */
@@ -86,6 +88,19 @@ export type VideoRequest = {
   maxShortSide?: number;
   /** Cap the frame rate. Never raises it. */
   maxFps?: number;
+  /** Turn, mirror, crop or reframe the picture (re-encodes, except a plain turn where the container stores rotation). */
+  transform?: VideoTransform;
+};
+
+export type VideoTransform = {
+  /** Clockwise, on top of the file's own rotation. */
+  rotate?: 0 | 90 | 180 | 270;
+  flipHorizontal?: boolean;
+  flipVertical?: boolean;
+  /** Region of the turned picture to keep, in its pixels. */
+  crop?: { left: number; top: number; width: number; height: number };
+  /** Output frame size; `cover` fills it (cropping the overflow), `contain` fits inside with black bars. */
+  frame?: { width: number; height: number; fit: 'cover' | 'contain' };
 };
 
 export type AudioRequest = {
@@ -95,6 +110,19 @@ export type AudioRequest = {
   bitrate?: number | 'copy';
   sampleRate?: number;
   channels?: number;
+  /** Volume changes: loudness normalisation or a fixed gain, and fades. */
+  level?: AudioLevel;
+};
+
+export type AudioLevel = {
+  /** Integrated loudness to reach, in LUFS (EBU R128: -23 broadcast, -16 podcasts, -14 streaming music). */
+  normalize?: number;
+  /** Gain in dB (ignored when normalising). */
+  gainDb?: number;
+  /** Highest sample peak allowed after the gain, in dBFS; the gain is lowered to respect it. Default -1. */
+  peakCeiling?: number;
+  fadeIn?: number;
+  fadeOut?: number;
 };
 
 export type ConvertRequest = {
@@ -132,6 +160,18 @@ export type MergeRequest = {
   /** Audio bitrate for re-encoded audio. */
   audioBitrate: number;
 };
+
+export type FramesRequest = {
+  /** Seconds from the file's start, in order. */
+  times: number[];
+  format: 'png' | 'jpeg' | 'webp';
+  /** 0–1, for JPEG and WebP. */
+  quality: number;
+  /** Largest output width in pixels; 0 keeps the video's size. Never upscales. */
+  maxWidth: number;
+};
+
+export type FramesResult = { frames: { time: number; blob: Blob }[]; width: number; height: number };
 
 export type EngineName = 'mediabunny' | 'ffmpeg';
 

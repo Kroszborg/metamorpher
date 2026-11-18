@@ -5,15 +5,15 @@ import type { ViewerProps } from './context';
 import type { ViewKind } from './sniff';
 
 // One code-split chunk per viewer, fetched the first time a file of that kind is opened.
-const TableViewer = lazy(() => import('./text/text-viewer'));
-const DataViewer = lazy(() => import('./text/text-viewer'));
+const TableViewer = lazy(() => import('./table/table-viewer'));
+const DataViewer = lazy(() => import('./data/data-viewer'));
 const TextViewer = lazy(() => import('./text/text-viewer'));
-const MarkdownViewer = lazy(() => import('./text/text-viewer'));
+const MarkdownViewer = lazy(() => import('./markdown/markdown-viewer'));
 const HexViewer = lazy(() => import('./hex/hex-viewer'));
-const PdfReader = lazy(() => import('./hex/hex-viewer'));
-const DocumentViewer = lazy(() => import('./hex/hex-viewer'));
-const ImageViewer = lazy(() => import('./hex/hex-viewer'));
-const MediaViewer = lazy(() => import('./hex/hex-viewer'));
+const PdfReader = lazy(() => import('./pdf/pdf-reader'));
+const DocumentViewer = lazy(() => import('./document/document-viewer'));
+const ImageViewer = lazy(() => import('./image/image-viewer'));
+const MediaViewer = lazy(() => import('./media/media-viewer'));
 const ArchiveViewer = lazy(() => import('./hex/hex-viewer'));
 const FontViewer = lazy(() => import('./hex/hex-viewer'));
 const SqliteViewer = lazy(() => import('./hex/hex-viewer'));

@@ -110,6 +110,7 @@ export function parseFfmpegProbe(log: string[], size: number): MediaInfo | null 
         width: turned ? ch : dw,
         height: turned ? dw : ch,
         rotation,
+        hdr: /smpte2084/.test(rest) ? 'pq' : /arib-std-b67/.test(rest) ? 'hlg' : null,
         fps: fps ? Number(fps[1]) : null,
         bitrate: br ? Number(br[1]) * 1000 : null,
         canDecode: false,

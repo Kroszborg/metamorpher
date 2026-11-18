@@ -24,7 +24,12 @@ export const serverConfig = {
   authSecret: env.BETTER_AUTH_SECRET || null,
   authUrl: env.BETTER_AUTH_URL || null,
   resendKey: env.RESEND_API_KEY || null,
-  emailFrom: env.EMAIL_FROM || null,
+  /** SMTP (for example a Gmail address with an app password). Host and port default to Gmail. */
+  smtpUser: env.SMTP_USER || null,
+  smtpPass: env.SMTP_PASS ? env.SMTP_PASS.replace(/\s+/g, '') : null,
+  smtpHost: env.SMTP_HOST || 'smtp.gmail.com',
+  smtpPort: Number(env.SMTP_PORT) || 465,
+  emailFrom: env.EMAIL_FROM || (env.SMTP_USER ? `Metamorpher <${env.SMTP_USER}>` : null),
   adminEmails: list(env.ADMIN_EMAILS),
   cronSecret: env.CRON_SECRET || null,
   analyticsOff: env.ANALYTICS_DISABLED === '1' || env.ANALYTICS_DISABLED === 'true',
@@ -40,7 +45,9 @@ export const hasDatabase = backendEnabled && (Boolean(serverConfig.databaseUrl) 
 export const accountsEnabled = hasDatabase && (Boolean(serverConfig.authSecret) || isDev);
 
 /** Real email delivery (Resend). In development without a key, links are printed to the console. */
-export const mailConfigured = Boolean(serverConfig.resendKey && serverConfig.emailFrom);
+export const smtpConfigured = Boolean(serverConfig.smtpUser && serverConfig.smtpPass);
+export const mailConfigured = smtpConfigured || Boolean(serverConfig.resendKey && serverConfig.emailFrom);
+export const mailProvider = smtpConfigured ? 'SMTP' : 'Resend';
 
 /** Email verification and password reset need a way to deliver links. */
 export const mailAvailable = mailConfigured || isDev;
@@ -65,8 +72,8 @@ export function configWarnings(): string[] {
   if (!mailConfigured) {
     w.push(
       isDev
-        ? 'RESEND_API_KEY / EMAIL_FROM are not set: verification and reset links are printed to the server console.'
-        : 'RESEND_API_KEY / EMAIL_FROM are not set: sign-up works without email verification and password reset is unavailable.',
+        ? 'No email service is set (SMTP_USER + SMTP_PASS, or RESEND_API_KEY + EMAIL_FROM): verification and reset links are printed to the server console.'
+        : 'No email service is set (SMTP_USER + SMTP_PASS, or RESEND_API_KEY + EMAIL_FROM): sign-up works without email verification and password reset is unavailable.',
     );
   }
   if (serverConfig.adminEmails.length === 0) w.push('ADMIN_EMAILS is empty: nobody can open /admin.');

@@ -42,6 +42,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Dropzone } from '@/components/workbench/dropzone';
 import { formatBytes } from '@/lib/files';
 import { cn } from '@/lib/utils';
+import { getAvailableTool } from '@/tools/registry';
 import type { ToolInfo } from '@/tools/types';
 import { IconButton, Kbd, ViewerLoading, ViewerProblem } from './bits';
 import { type Shortcut, useKeys, ViewerContext } from './context';
@@ -215,6 +216,20 @@ function FileView({ tool, kinds, as, files, index, onIndex, onOpen, onClose, ful
     body = <ViewerProblem title="This file could not be read">{sniffError}</ViewerProblem>;
   } else if (!sniffed || !kind) {
     body = <ViewerLoading label="Reading the file…" />;
+  } else if (wrongKind && sniffed.kind === 'hex' && !sniffed.unsupported) {
+    body = (
+      <ViewerProblem
+        title={`This does not look like ${KIND_INFO[(kinds as ViewKind[])[0]!].noun}`}
+        actions={
+          <Button size="lg" variant="outline" onClick={() => setViewAs('hex')}>
+            View bytes (hex)
+          </Button>
+        }
+      >
+        The file holds binary data that is not a format this viewer knows. It may be damaged, encrypted, or a
+        different kind of file with the wrong name.
+      </ViewerProblem>
+    );
   } else if (wrongKind) {
     const info = KIND_INFO[sniffed.kind];
     body = (
@@ -224,16 +239,19 @@ function FileView({ tool, kinds, as, files, index, onIndex, onOpen, onClose, ful
         title={`This is ${sniffed.format.match(/^[AEIOU]/i) ? 'an' : 'a'} ${sniffed.format}, not ${KIND_INFO[(kinds as ViewKind[])[0]!].noun}`}
         actions={
           <>
-            <Button size="lg" onClick={() => handOff(info.slug, files, (href) => router.push(href), VIEWER_SLUGS)}>
-              Open in {info.label}
-            </Button>
+            {getAvailableTool(info.slug) ? (
+              <Button size="lg" onClick={() => handOff(info.slug, files, (href) => router.push(href), VIEWER_SLUGS)}>
+                Open in {info.label}
+              </Button>
+            ) : null}
             <Button size="lg" variant="outline" onClick={() => setViewAs(sniffed.kind)}>
               Show it here
             </Button>
           </>
         }
       >
-        {tool.title} shows {KIND_INFO[(kinds as ViewKind[])[0]!].noun}. The {info.label.toLowerCase()} shows {info.noun}.
+        {tool.title} shows {KIND_INFO[(kinds as ViewKind[])[0]!].noun}.
+        {getAvailableTool(info.slug) ? ` The ${info.label.toLowerCase()} shows ${info.noun}.` : ''}
       </ViewerProblem>
     );
   } else if (unsupported) {

@@ -51,6 +51,7 @@ import {
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { BlobSink } from './blob-sink';
 import { type SpeedProcessor, TapeResampler, TimeStretcher } from './dsp';
+import { LoudnessMeter } from './loudness';
 import {
   CONTAINERS,
   COMMON_AUDIO_BITRATES,
@@ -67,6 +68,7 @@ import {
 } from './presets';
 import type {
   AudioCodecId,
+  AudioLevel,
   Capabilities,
   Container,
   ConvertRequest,
@@ -76,7 +78,10 @@ import type {
   MediaInfo,
   MergeRequest,
   TrimRequest,
+  FramesRequest,
+  FramesResult,
   VideoCodecId,
+  VideoTransform,
   WorkerOutcome,
 } from './types';
 
@@ -223,7 +228,11 @@ async function describe(input: Input, file: File): Promise<MediaInfo> {
       fps = null;
     }
     const codec = await v.getCodec();
+    // WebCodecs names the transfers 'pq' and 'hlg' (lib.dom's type lags behind).
+    const transfer = String((await v.getColorSpace().catch(() => null))?.transfer ?? '');
+    const hdr = transfer === 'pq' ? 'pq' : transfer === 'hlg' ? 'hlg' : null;
     video = {
+      hdr,
       codec: codec as VideoCodecId | 'prores' | null,
       codedWidth: await v.getCodedWidth(),
       codedHeight: await v.getCodedHeight(),
@@ -328,6 +337,16 @@ function discardFallback(conversion: Conversion, wanted: { video: boolean; audio
     return fallback('webcodecs-error', `process the ${kind} track (${d.reason})`);
   }
   return null;
+}
+
+/**
+ * What re-encoding does to an HDR source here: WebCodecs encodes 8-bit and the
+ * HDR colour tags (BT.2020, PQ/HLG) stay on the output, so HDR-aware players
+ * show the right brightness and colour, with a little banding in smooth
+ * gradients; players without HDR support show it pale.
+ */
+function hdrNote(hdr: 'pq' | 'hlg', codec: VideoCodecId): string {
+  return `This is an HDR video (${hdr === 'pq' ? 'HDR10 / PQ' : 'HLG'}). It was re-encoded as 8-bit ${videoCodecLabel(codec)} and keeps its HDR colour tags: HDR-aware players (phones, browsers, TVs) show it correctly, possibly with slight banding in smooth gradients; players without HDR support show it washed out. Fast trims and Copy keep the original 10-bit stream.`;
 }
 
 /** Half a frame: how far a copied cut may start from the requested time and still count as exact. */
@@ -522,6 +541,128 @@ async function mp3CopyTrim(input: Input, info: MediaInfo, trim: TrimRequest, pro
   };
 }
 
+// ── Picture transforms ─────────────────────────────────────────────────────
+
+/** Output size after turning, cropping and reframing (even numbers). */
+function transformedSize(width: number, height: number, tf: VideoTransform): { width: number; height: number; scaled: boolean } {
+  const turned = tf.rotate === 90 || tf.rotate === 270;
+  let w = turned ? height : width;
+  let h = turned ? width : height;
+  if (tf.crop) {
+    w = Math.min(w, tf.crop.width);
+    h = Math.min(h, tf.crop.height);
+  }
+  if (tf.frame) {
+    w = tf.frame.width;
+    h = tf.frame.height;
+  }
+  return { width: even(w), height: even(h), scaled: true };
+}
+
+/** Mediabunny's options: it turns, then mirrors left to right, then crops. Upside down = half a turn plus a mirror. */
+function transformOptions(tf: VideoTransform): Partial<ConversionVideoOptions> {
+  const rotate = (((tf.rotate ?? 0) + (tf.flipVertical ? 180 : 0)) % 360) as 0 | 90 | 180 | 270;
+  const flip = !!tf.flipHorizontal !== !!tf.flipVertical;
+  const out: Partial<ConversionVideoOptions> = { allowTransformationMetadata: false };
+  if (rotate) out.rotate = rotate;
+  if (flip) out.flip = true;
+  if (tf.crop) {
+    out.crop = { left: Math.round(tf.crop.left), top: Math.round(tf.crop.top), width: even(tf.crop.width), height: even(tf.crop.height) };
+  }
+  return out;
+}
+
+function describeTransform(tf: VideoTransform): string {
+  const parts: string[] = [];
+  if (tf.rotate) parts.push(`turned ${tf.rotate}°`);
+  if (tf.flipHorizontal) parts.push('mirrored');
+  if (tf.flipVertical) parts.push('flipped upside down');
+  if (tf.crop) parts.push(`cropped to ${even(tf.crop.width)}×${even(tf.crop.height)}`);
+  if (tf.frame) parts.push(tf.frame.fit === 'cover' ? 'filled the frame, edges cropped' : 'fitted in the frame with black bars');
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
+// ── Volume ─────────────────────────────────────────────────────────────────
+
+const toDb = (x: number) => 20 * Math.log10(Math.max(x, 1e-9));
+
+/**
+ * The linear gain for a level request: from a loudness measurement (one
+ * decoding pass) or the fixed gain, held under the peak ceiling (no limiter).
+ */
+async function levelPlan(input: Input, level: AudioLevel, onProgress?: Progress): Promise<{ gain: number; notes: string[] }> {
+  const notes: string[] = [];
+  const ceiling = level.peakCeiling ?? -1;
+  const track = await input.getPrimaryAudioTrack();
+  if (!track) return { gain: 1, notes };
+  const duration = (await track.computeDuration()) || 1;
+  let meter: LoudnessMeter | null = null;
+  const report = throttled(onProgress);
+  for await (const sample of new AudioSampleSink(track).samples()) {
+    meter ??= new LoudnessMeter(sample.numberOfChannels, sample.sampleRate);
+    const planes: Float32Array[] = [];
+    for (let c = 0; c < sample.numberOfChannels; c++) {
+      const plane = new Float32Array(sample.numberOfFrames);
+      sample.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
+      planes.push(plane);
+    }
+    meter.push(planes);
+    report((0.3 * (sample.timestamp + sample.duration)) / duration);
+    sample.close();
+  }
+  const peakDb = meter ? toDb(meter.peak) : -Infinity;
+  const lufs = meter?.integrated() ?? null;
+  let gainDb = level.gainDb ?? 0;
+  if (level.normalize !== undefined) {
+    if (lufs === null) {
+      notes.push('The audio is silent (or under half a second long), so its loudness could not be measured; the level is unchanged.');
+      gainDb = 0;
+    } else {
+      gainDb = level.normalize - lufs;
+      notes.push(`Measured ${lufs.toFixed(1)} LUFS integrated (EBU R128), sample peak ${peakDb.toFixed(1)} dBFS.`);
+    }
+  }
+  if (gainDb > 0 && peakDb + gainDb > ceiling) {
+    const limited = Math.max(0, ceiling - peakDb);
+    notes.push(
+      `Raising the level by ${gainDb.toFixed(1)} dB would push peaks over ${ceiling} dBFS and clip, so the gain was held at +${limited.toFixed(1)} dB${lufs !== null ? ` (about ${(lufs + limited).toFixed(1)} LUFS)` : ''}. No limiter or compressor is applied.`,
+    );
+    gainDb = limited;
+  } else if (level.normalize !== undefined && lufs !== null) {
+    notes.push(`Gain ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB to reach ${level.normalize} LUFS.`);
+  } else if (gainDb) {
+    notes.push(`Gain ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB${Number.isFinite(peakDb) ? `; peaks now ${(peakDb + gainDb).toFixed(1)} dBFS` : ''}.`);
+  }
+  if (level.fadeIn) notes.push(`Fades in over ${level.fadeIn} s.`);
+  if (level.fadeOut) notes.push(`Fades out over the last ${level.fadeOut} s.`);
+  return { gain: 10 ** (gainDb / 20), notes };
+}
+
+/** Multiplies every sample by the gain and the fade envelope (quarter-sine curves). */
+function levelProcess(gain: number, fadeIn: number, fadeOut: number, start: number, end: number) {
+  return (sample: AudioSample): AudioSample => {
+    const n = sample.numberOfFrames;
+    const ch = sample.numberOfChannels;
+    const rate = sample.sampleRate;
+    const data = new Float32Array(n * ch);
+    for (let c = 0; c < ch; c++) sample.copyTo(data.subarray(c * n, (c + 1) * n), { planeIndex: c, format: 'f32-planar' });
+    for (let i = 0; i < n; i++) {
+      const t = sample.timestamp + i / rate;
+      let g = gain;
+      if (fadeIn > 0 && t - start < fadeIn) g *= Math.sin((Math.max(0, t - start) / fadeIn) * (Math.PI / 2));
+      if (fadeOut > 0 && end - t < fadeOut) g *= Math.sin((Math.max(0, end - t) / fadeOut) * (Math.PI / 2));
+      if (g === 1) continue;
+      for (let c = 0; c < ch; c++) {
+        const k = c * n + i;
+        data[k] = Math.max(-1, Math.min(1, data[k]! * g));
+      }
+    }
+    const out = new AudioSample({ data, format: 'f32-planar', numberOfChannels: ch, sampleRate: rate, timestamp: sample.timestamp });
+    sample.close();
+    return out;
+  };
+}
+
 // ── Convert ────────────────────────────────────────────────────────────────
 
 async function convert(file: File, req: ConvertRequest, onProgress?: Progress): Promise<WorkerOutcome> {
@@ -566,7 +707,11 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
   if (wantVideo && info.video) {
     const v = info.video;
     const vr = req.video ?? {};
-    const shape = fitShortSide(v.width, v.height, vr.maxShortSide);
+    const tf = vr.transform;
+    // Turning alone can be stored as rotation metadata; mirroring, cropping and reframing need new frames.
+    const reframes = !!tf && (!!tf.flipHorizontal || !!tf.flipVertical || !!tf.crop || !!tf.frame);
+    const turn = tf?.rotate ?? 0;
+    const shape = tf ? transformedSize(v.width, v.height, tf) : fitShortSide(v.width, v.height, vr.maxShortSide);
     const fpsCap = capFps(v.fps, speed && speed.factor > 1 ? (v.fps ?? 30) / speed.factor : vr.maxFps);
     const srcCodec = v.codec;
     const copyWanted = (vr.quality ?? 'balanced') === 'copy' && !vr.bitrate;
@@ -575,7 +720,8 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
     const accurateTrim = !!trim && trim.accurate;
     // Copied frames keep their stored orientation, so the container must be able to say how to turn them.
     const rotationFits = v.rotation === 0 || format.supportsVideoRotationMetadata;
-    let copy = codecFits && rotationFits && !shape.scaled && !fpsCap && !speed && (copyWanted || (!!trim && !trim.accurate));
+    let copy = codecFits && rotationFits && (!shape.scaled || (!!tf && !reframes)) && !fpsCap && !speed && !reframes &&
+      (!turn || format.supportsVideoRotationMetadata) && (copyWanted || (!!trim && !trim.accurate));
     if (!rotationFits && (copyWanted || (!!trim && !trim.accurate))) {
       notes.push(`${CONTAINERS[req.container].label} cannot store rotation, so the ${v.rotation}° turn was applied to the frames (re-encoded).`);
     }
@@ -590,8 +736,10 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
       if (!copy) notes.push('The in point is not on a key frame, so the video was re-encoded for a frame-accurate cut.');
     }
     if (copy) {
-      videoOpts = {};
-      videoDesc = `Copied ${videoCodecLabel(srcCodec)} ${v.width}×${v.height} without re-encoding`;
+      videoOpts = turn ? { rotate: turn } : {};
+      videoDesc = turn
+        ? `Copied ${videoCodecLabel(srcCodec)} without re-encoding; turned ${turn}° with rotation metadata (${shape.width}×${shape.height})`
+        : `Copied ${videoCodecLabel(srcCodec)} ${v.width}×${v.height} without re-encoding`;
     } else {
       if (!v.canDecode) return fallback('video-decode', `decode ${videoCodecLabel(srcCodec)} video`);
       // Trims keep the source codec when it can be encoded here.
@@ -607,9 +755,9 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
       }
       const quality = accurateTrim || speed ? (vr.quality === 'copy' || !vr.quality ? 'high' : vr.quality) : vr.quality;
       const plan = planVideo(
-        { ...v, fps: fpsCap ?? v.fps },
+        { ...v, width: shape.width, height: shape.height, fps: fpsCap ?? v.fps },
         codec,
-        { quality, bitrate: vr.bitrate, maxShortSide: vr.maxShortSide },
+        { quality, bitrate: vr.bitrate, maxShortSide: tf ? undefined : vr.maxShortSide },
       );
       if (plan.cappedAt) notes.push(`Video bitrate held at the source's ${formatBitrate(plan.cappedAt)} (re-encoding cannot add detail).`);
       if (vr.maxShortSide && !shape.scaled && Math.min(v.width, v.height) < vr.maxShortSide) {
@@ -619,10 +767,11 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
         codec,
         width: shape.width,
         height: shape.height,
-        fit: 'fill',
+        fit: tf?.frame?.fit ?? 'fill',
         quality: new Quality({ bitrate: plan.bitrate }),
         forceTranscode: true,
       };
+      if (tf) Object.assign(videoOpts, transformOptions(tf));
       videoTarget = plan.bitrate;
       if (fpsCap) videoOpts.frameRate = fpsCap;
       if (speed) {
@@ -633,8 +782,9 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
           return sample;
         };
       }
+      if (v.hdr) notes.push(hdrNote(v.hdr, codec));
       const outFps = speed ? (fpsCap ?? v.fps ?? 30) * speed.factor : (fpsCap ?? v.fps);
-      videoDesc = `Re-encoded to ${videoCodecLabel(codec)} ${shape.width}×${shape.height}${outFps ? ` ${Math.round(outFps * 100) / 100} fps` : ''} at ${formatBitrate(plan.bitrate)}`;
+      videoDesc = `Re-encoded to ${videoCodecLabel(codec)} ${shape.width}×${shape.height}${outFps ? ` ${Math.round(outFps * 100) / 100} fps` : ''} at ${formatBitrate(plan.bitrate)}${tf ? describeTransform(tf) : ''}`;
     }
   }
 
@@ -645,7 +795,7 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
   if (wantAudio && info.audio) {
     const a = info.audio;
     const ar = req.audio ?? {};
-    const changesFormat = !!ar.sampleRate || !!ar.channels;
+    const changesFormat = !!ar.sampleRate || !!ar.channels || !!ar.level;
     const copy = !speed && !changesFormat && !(trim && trim.accurate) &&
       (ar.bitrate === 'copy' || (!!trim && !trim.accurate)) &&
       (!ar.codec || ar.codec === 'auto' || ar.codec === a.codec) &&
@@ -701,6 +851,17 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
             ? 'Audio is time-stretched (WSOLA) so voices keep their pitch.'
             : 'Audio is resampled like a tape, so its pitch changes with the speed.',
         );
+      }
+      if (ar.level && !speed) {
+        const level = ar.level;
+        const lv = await levelPlan(input, level, onProgress);
+        notes.push(...lv.notes);
+        const aTrack = await input.getPrimaryAudioTrack();
+        const tStart = aTrack ? await aTrack.getFirstTimestamp() : 0;
+        const tEnd = tStart + info.duration;
+        const make = () => levelProcess(lv.gain, level.fadeIn ?? 0, level.fadeOut ?? 0, tStart, tEnd);
+        audioOpts.process = make();
+        freshAudioProcess = make;
       }
       const wasm = encoder.wasm ? ' (WASM encoder: the browser has none for this setting)' : '';
       const rate = sampleRate ?? a.sampleRate;
@@ -1343,7 +1504,41 @@ function recycling<A extends unknown[]>(fn: (...args: A) => Promise<WorkerOutcom
   };
 }
 
+/**
+ * Still images of the video at the given times (display orientation, the
+ * frame shown at each time), encoded by the browser. Null when the video
+ * cannot be decoded here.
+ */
+async function frames(file: File, req: FramesRequest, onProgress?: Progress): Promise<FramesResult | null> {
+  return withInput(file, async (input) => {
+    if (!(await input.canRead())) return null;
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) throw new Error('This file has no video track.');
+    if (!(await track.canDecode())) return null;
+    const progress = throttled(onProgress);
+    const start = Math.max(0, await track.getFirstTimestamp());
+    const dw = await track.getDisplayWidth();
+    const dh = await track.getDisplayHeight();
+    const width = req.maxWidth > 0 && req.maxWidth < dw ? even(req.maxWidth) : dw;
+    const height = width === dw ? dh : even((dh * width) / dw);
+    const sink = new CanvasSink(track, { width, height, fit: 'fill', poolSize: 1 });
+    const out: FramesResult['frames'] = [];
+    const type = `image/${req.format}`;
+    let i = 0;
+    for await (const frame of sink.canvasesAtTimestamps(req.times.map((t) => start + t))) {
+      const t = req.times[i]!;
+      i += 1;
+      if (!frame) continue;
+      const canvas = frame.canvas as OffscreenCanvas;
+      out.push({ time: t, blob: await canvas.convertToBlob(req.format === 'png' ? { type } : { type, quality: req.quality }) });
+      progress(i / req.times.length);
+    }
+    return { frames: out, width, height };
+  });
+}
+
 const api = {
+  frames,
   probe,
   capabilities,
   convert: recycling(convert),

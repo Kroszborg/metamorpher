@@ -11,7 +11,7 @@ export default function nextConfig(phase: string): NextConfig {
   const backend = env.ENABLE_BACKEND === '1';
   const hasDb = backend && (dev || Boolean(env.DATABASE_URL));
   const accounts = hasDb && (dev || Boolean(env.BETTER_AUTH_SECRET));
-  const mail = dev || Boolean(env.RESEND_API_KEY && env.EMAIL_FROM);
+  const mail = dev || Boolean(env.SMTP_USER && env.SMTP_PASS) || Boolean(env.RESEND_API_KEY && env.EMAIL_FROM);
   const analytics = hasDb && !(env.ANALYTICS_DISABLED === '1' || env.ANALYTICS_DISABLED === 'true');
 
   return {

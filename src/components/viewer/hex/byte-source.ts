@@ -11,12 +11,19 @@ export class ByteSource {
   #file: Blob;
   #pages = new Map<number, Uint8Array>();
   #loading = new Map<number, Promise<Uint8Array>>();
-  #onLoad: () => void;
+  #onLoad: (() => void) | null = null;
 
-  constructor(file: Blob, onLoad: () => void) {
+  constructor(file: Blob) {
     this.#file = file;
     this.size = file.size;
-    this.#onLoad = onLoad;
+  }
+
+  /** Calls `fn` whenever a page arrives; returns the unsubscribe. */
+  listen(fn: () => void): () => void {
+    this.#onLoad = fn;
+    return () => {
+      if (this.#onLoad === fn) this.#onLoad = null;
+    };
   }
 
   #load(page: number): Promise<Uint8Array> {
@@ -36,7 +43,7 @@ export class ByteSource {
           return bytes;
         });
       this.#loading.set(page, p);
-      p.then(() => this.#onLoad(), () => this.#loading.delete(page));
+      p.then(() => this.#onLoad?.(), () => this.#loading.delete(page));
     }
     return p;
   }

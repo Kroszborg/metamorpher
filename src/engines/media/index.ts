@@ -5,7 +5,7 @@ import { abortError, isAbortError, WorkerHost } from '../worker-host';
 import { convertPlan, type FfmpegPlan, gifPlanArgs, gifToVideoArgs, mergeArgs, softTrimPlan } from './ffmpeg-args';
 import { parseFfmpegProbe } from './ffmpeg-probe';
 import type { MediaWorkerApi } from './media.worker';
-import { CONTAINERS, containerForExtension, sameContainer, VIDEO_CODEC_LABEL } from './presets';
+import { CONTAINERS, containerForExtension, sameContainer, VIDEO_CODEC_LABEL, videoCodecLabel as videoCodecLabelOf } from './presets';
 import type {
   Capabilities,
   Container,
@@ -17,6 +17,8 @@ import type {
   MediaReport,
   MediaResult,
   MergeRequest,
+  FramesRequest,
+  FramesResult,
   TrimRequest,
   VideoCodecId,
   WorkerOutcome,
@@ -413,8 +415,12 @@ export const mediaEngine = {
 
   async convert(file: File, req: ConvertRequest, opts: MediaCallOptions = {}): Promise<MediaResult> {
     const started = Date.now();
+    // A copy (mute, fast trim, plain turn) may not need a video encoder at all: let the worker decide then.
+    const mayCopy = req.video?.quality === 'copy' && !req.trim?.accurate && !req.speed && !req.video.maxShortSide && !req.video.maxFps &&
+      !(req.video.transform && (req.video.transform.crop || req.video.transform.frame || req.video.transform.flipHorizontal || req.video.transform.flipVertical));
     const planned = plannedFallback(await this.capabilities().catch(() => null), req.container, req.video?.codec);
-    const outcome: WorkerOutcome = planned
+    const skipPlanned = mayCopy && planned?.code === 'video-encode';
+    const outcome: WorkerOutcome = planned && !skipPlanned
       ? { ok: false, fallback: planned }
       : await tryFast((api, p) => api.convert(file, req, p), opts);
     if (outcome.ok) return fastResult(outcome, started);
@@ -445,7 +451,8 @@ export const mediaEngine = {
   async merge(files: File[], req: MergeRequest, opts: MediaCallOptions = {}): Promise<MediaResult> {
     const started = Date.now();
     const planned = plannedFallback(await this.capabilities().catch(() => null), req.container);
-    const outcome: WorkerOutcome = planned
+    // Clips that match can be joined without any encoder: only container-level gaps skip the fast path up front.
+    const outcome: WorkerOutcome = planned && planned.code !== 'video-encode'
       ? { ok: false, fallback: planned }
       : await tryFast((api, p) => api.merge(files, req, p), opts);
     if (outcome.ok) return fastResult(outcome, started);
@@ -514,6 +521,60 @@ export const mediaEngine = {
       }
       throw err;
     }
+  },
+
+  /**
+   * Still images at the given times. WebCodecs decodes and the browser encodes
+   * PNG/JPEG/WebP; video it cannot decode goes through ffmpeg.wasm (PNG or
+   * JPEG, one seek per image).
+   */
+  async frames(file: File, req: FramesRequest, opts: MediaCallOptions = {}): Promise<FramesResult & { report: MediaReport }> {
+    const started = Date.now();
+    opts.onProgress?.(0, FAST_LABEL);
+    const progress = proxy((f: number) => opts.onProgress?.(f, FAST_LABEL));
+    const fast = await jobs.call((api) => api.frames(file, req, progress), opts.signal).catch((err: unknown) => {
+      if (opts.signal?.aborted || isAbortError(err)) throw abortError();
+      jobs.terminate();
+      if (/has no video/.test(String(err))) throw err;
+      return null;
+    });
+    if (fast && fast.frames.length) {
+      return { ...fast, report: { engine: 'mediabunny', engineLabel: FAST_LABEL, notes: [], ms: Date.now() - started } };
+    }
+    const info = await this.inspect(file, opts.signal);
+    if (!info.video) throw new Error('This file has no video track.');
+    const ext = req.format === 'png' ? 'png' : 'jpg';
+    const w = req.maxWidth > 0 && req.maxWidth < info.video.width ? Math.round(req.maxWidth / 2) * 2 : 0;
+    const reason: FallbackReason = info.readable
+      ? { code: 'video-decode', message: `decode ${info.video.label ?? videoCodecLabelOf(info.video.codec)} video` }
+      : { code: 'container-read', message: `read ${inputExt(file).toUpperCase()} files` };
+    const note = `Software engine: ${describeFallback(reason).replace(/; using.*$/, '')}`;
+    // Batches of 24 seeks per run keep each command line and the memory small.
+    const out: FramesResult['frames'] = [];
+    for (let k = 0; k < req.times.length; k += 24) {
+      const times = req.times.slice(k, k + 24);
+      const blobs = await ffmpegEngine.runMany({
+        input: file,
+        inputExt: inputExt(file),
+        outputs: times.map((_, i) => `f${i}.${ext}`),
+        args: (input, outs) => [
+          '-hide_banner',
+          ...times.flatMap((t) => ['-ss', t.toFixed(3), '-i', input]),
+          ...outs.flatMap((o, i) => ['-map', `${i}:v:0`, '-frames:v', '1', ...(w ? ['-vf', `scale=${w}:-2`] : []), ...(ext === 'jpg' ? ['-q:v', String(Math.round(2 + (1 - req.quality) * 20))] : []), o]),
+        ],
+        expectedOutputBytes: times.length * (info.video.width * info.video.height * (ext === 'png' ? 3 : 0.5)),
+        signal: opts.signal,
+        onProgress: () => opts.onProgress?.((k + times.length / 2) / req.times.length, note),
+      });
+      blobs.forEach((b, i) => b && out.push({ time: times[i]!, blob: b }));
+    }
+    if (!out.length) throw new Error('No frames could be read at those times.');
+    return {
+      frames: out,
+      width: w || info.video.width,
+      height: w ? Math.round((w * info.video.height) / info.video.width / 2) * 2 : info.video.height,
+      report: { engine: 'ffmpeg', engineLabel: SLOW_LABEL, fallback: reason, notes: req.format === 'webp' ? ['The software engine writes JPEG instead of WebP.'] : [], ms: Date.now() - started },
+    };
   },
 
   /** Stops any running job immediately. */

@@ -2,7 +2,7 @@ import 'server-only';
 import { and, count, desc, eq, gte, ilike, lte, max, or, sql } from 'drizzle-orm';
 import journal from '../../drizzle/meta/_journal.json';
 import { addDays, DURATION_EDGES, rollup, utcDay } from './analytics';
-import { configWarnings, isAdminEmail, mailConfigured, serverConfig } from './config';
+import { configWarnings, isAdminEmail, mailConfigured, mailProvider, serverConfig } from './config';
 import { type Db, schema } from './db';
 
 const d = schema.analyticsDaily;
@@ -281,7 +281,7 @@ export async function system(db: Db) {
     dbError,
     latencyMs,
     mailConfigured,
-    mailMode: mailConfigured ? 'Resend' : serverConfig.isDev ? 'Console (development)' : 'Off',
+    mailMode: mailConfigured ? mailProvider : serverConfig.isDev ? 'Console (development)' : 'Off',
     warnings: configWarnings(),
     migrations: { applied, expected: journal.entries.length, latest: journal.entries.at(-1)?.tag ?? null },
     lastRollup: last ? { day: last.day, at: last.at, events: last.events } : null,
