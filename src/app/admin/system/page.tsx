@@ -65,7 +65,7 @@ export default async function AdminSystem() {
               {!migrated ? <p className="mt-1 text-xs text-muted-foreground">Run npm run db:migrate with DATABASE_URL set.</p> : null}
             </Row>
             <Row label="Email">
-              {s.mailConfigured ? <StatusBadge kind="success">Resend</StatusBadge> : <StatusBadge kind="warning">{s.mailMode}</StatusBadge>}
+              {s.mailConfigured ? <StatusBadge kind="success">{s.mailMode}</StatusBadge> : <StatusBadge kind="warning">{s.mailMode}</StatusBadge>}
             </Row>
             <Row label="Admins">{s.adminCount} in ADMIN_EMAILS</Row>
             <Row label="Last analytics rollup">

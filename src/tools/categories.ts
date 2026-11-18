@@ -4,6 +4,7 @@ import {
   Files02Icon,
   FileExportIcon,
   FileImportIcon,
+  FileViewIcon,
   Image01Icon,
   PencilEdit02Icon,
   SecurityCheckIcon,
@@ -56,6 +57,12 @@ export const CATEGORIES: readonly Category[] = [
     title: 'Audio & video',
     description: 'Convert, trim and extract audio and video.',
     icon: Video01Icon,
+  },
+  {
+    id: 'view',
+    title: 'View & play',
+    description: 'Open any file to read, browse or play it: tables, data, code, PDFs, documents, images, audio, video and archives.',
+    icon: FileViewIcon,
   },
   {
     id: 'ai',

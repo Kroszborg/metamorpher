@@ -6,7 +6,7 @@
  */
 import { gifArgs } from '@/engines/ffmpeg/presets';
 import { CONTAINERS, audioBitrateWanted, audioCodecLabel, formatBitrate, planAudioBitrate, planVideo } from './presets';
-import type { ConvertRequest, GifRequest, MediaInfo, MergeRequest } from './types';
+import type { AudioLevel, ConvertRequest, GifRequest, MediaInfo, MergeRequest, VideoTransform } from './types';
 
 export type FfmpegPlan = {
   /** Arguments before `-i <input>` (input seeking). */
@@ -113,15 +113,20 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
   } else {
     const vr = req.video ?? {};
     const copy =
-      !speed && !vr.maxShortSide && !vr.maxFps && !vr.bitrate &&
-      (vr.quality === 'copy' || fastTrim) &&
-      (copyFits(req.container, info?.video?.codec, 'video') || (sameContainer && !info));
+      !speed && !vr.maxShortSide && !vr.maxFps && !vr.bitrate && !vr.transform &&
+      ((vr.quality === 'copy' && !req.trim?.accurate) || fastTrim) &&
+      (copyFits(req.container, info?.video?.codec, 'video') || (sameContainer && (!info || info.engine === 'ffmpeg')));
     if (copy) {
       post.push('-c:v', 'copy');
       video = 'Copied without re-encoding';
     } else {
-      const filters = [scaleFilter(vr.maxShortSide)];
-      if (speed) filters.push(`setpts=PTS/${speed.factor}`);
+      const filters = vr.transform ? transformFilters(vr.transform) : [scaleFilter(vr.maxShortSide)];
+      if (speed) {
+        // An explicit fps filter (not -fpsmax) picks the frames for a speed-up; -fpsmax shifted the picture
+        // two frames late against the sound (measured).
+        filters.push(`setpts=(PTS-STARTPTS)/${speed.factor}`);
+        if (speed.factor > 1 && info?.video?.fps) filters.push(`fps=${Math.round(info.video.fps * 1000) / 1000}`);
+      }
       const plan = info?.video ? planVideo(info.video, 'avc', vr) : null;
       if (plan?.cappedAt) notes.push(`Video bitrate held at the source's ${formatBitrate(plan.cappedAt)}.`);
       const quality = vr.quality ?? 'balanced';
@@ -131,9 +136,16 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
         video = `Re-encoded to VP8 at ${formatBitrate(rate)}`;
         if (vr.codec && vr.codec !== 'auto' && vr.codec !== 'vp8') notes.push(`The software engine writes VP8 instead of ${vr.codec.toUpperCase()}.`);
       } else if (req.container === 'avi') {
-        const q = { small: '8', balanced: '5', high: '3', copy: '4' }[quality];
-        post.push('-c:v', 'mpeg4', '-q:v', q);
-        video = 'Re-encoded to MPEG-4 Part 2';
+        if (plan) {
+          // MPEG-4 Part 2 needs about 1.5× H.264's bitrate for the same picture; never more than the source.
+          const rate = Math.round(Math.min(plan.bitrate * 1.5, info?.video?.bitrate ?? Infinity));
+          post.push('-c:v', 'mpeg4', '-vtag', 'xvid', '-b:v', String(rate), '-maxrate', String(Math.round(rate * 1.5)), '-bufsize', String(rate * 2));
+          video = `Re-encoded to MPEG-4 Part 2 at ${formatBitrate(rate)}`;
+        } else {
+          const q = { small: '8', balanced: '5', high: '3', copy: '4' }[quality];
+          post.push('-c:v', 'mpeg4', '-vtag', 'xvid', '-q:v', q);
+          video = 'Re-encoded to MPEG-4 Part 2';
+        }
       } else {
         post.push('-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p');
         if (plan) {
@@ -145,9 +157,13 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
         }
         if (vr.codec && vr.codec !== 'auto' && vr.codec !== 'avc') notes.push(`The software engine writes H.264 instead of ${vr.codec.toUpperCase()}.`);
       }
+      if (info?.video?.hdr) {
+        // The software encoders write 8-bit SDR: tone-map to BT.709 rather than leave PQ/HLG values to look washed out.
+        filters.unshift('zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p');
+        notes.push(`This HDR video (${info.video.hdr === 'pq' ? 'HDR10 / PQ' : 'HLG'}) was tone-mapped to standard range (SDR, BT.709), since the software engine writes 8-bit video.`);
+      }
       post.push('-vf', filters.join(','));
       if (vr.maxFps) post.push('-fpsmax', String(vr.maxFps));
-      if (speed && speed.factor > 1 && info?.video?.fps) post.push('-fpsmax', String(Math.round(info.video.fps)));
     }
   }
 
@@ -157,20 +173,25 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
     post.push('-an');
   } else {
     const ar = req.audio ?? {};
-    const copy = !speed && !ar.sampleRate && !ar.channels && (ar.bitrate === 'copy' || fastTrim) &&
-      (copyFits(req.container, info?.audio?.codec, 'audio') || (sameContainer && !info));
+    const copy = !speed && !ar.sampleRate && !ar.channels && !ar.level && ((ar.bitrate === 'copy' && !req.trim?.accurate) || fastTrim) &&
+      (copyFits(req.container, info?.audio?.codec, 'audio') || (sameContainer && (!info || info.engine === 'ffmpeg')));
     if (copy) {
       post.push('-c:a', 'copy');
-      audio = `Copied ${audioCodecLabel(info?.audio?.codec)} without re-encoding`;
+      audio = info?.audio ? `Copied ${info.audio.label ?? audioCodecLabel(info.audio.codec)} without re-encoding` : 'Copied without re-encoding';
     } else {
-      // 'copy' means "the source's bitrate"; when it is unknown (unreadable input), 192 kbps.
-      const wanted = ar.bitrate === 'copy' && !info?.audio ? 192_000 : audioBitrateWanted(ar.bitrate);
+      // 'copy' means "the source's bitrate"; when it is unknown, 192 kbps.
+      const wanted = ar.bitrate === 'copy' && !info?.audio?.bitrate ? 192_000 : audioBitrateWanted(ar.bitrate);
       const plan = planAudioBitrate(wanted, info?.audio ?? null);
       if (plan.cappedAt && !['flac', 'wav'].includes(req.container)) notes.push(`Audio bitrate held at the source's ${formatBitrate(plan.cappedAt)}.`);
       const enc = audioEncoder(req.container, plan.bitrate);
       post.push(...enc.args);
       if (ar.sampleRate) post.push('-ar', String(ar.sampleRate));
       if (ar.channels) post.push('-ac', String(ar.channels));
+      if (ar.level && !speed) {
+        const af = levelFilters(ar.level, info?.duration ?? 0);
+        if (af.filters.length) post.push('-af', af.filters.join(','));
+        notes.push(...af.notes);
+      }
       if (speed) {
         const sr = info?.audio?.sampleRate;
         if (speed.keepPitch || !sr) {
@@ -189,6 +210,44 @@ export function convertPlan(req: ConvertRequest, info: MediaInfo | null, sameCon
   return { pre, post, ext: c.ext, video, audio, notes };
 }
 
+/** ffmpeg filters for a picture transform (ffmpeg has already applied the file's own rotation). */
+function transformFilters(tf: VideoTransform): string[] {
+  const f: string[] = [];
+  if (tf.rotate === 90) f.push('transpose=clock');
+  else if (tf.rotate === 180) f.push('hflip,vflip');
+  else if (tf.rotate === 270) f.push('transpose=cclock');
+  if (tf.flipHorizontal) f.push('hflip');
+  if (tf.flipVertical) f.push('vflip');
+  if (tf.crop) f.push(`crop=${Math.round(tf.crop.width / 2) * 2}:${Math.round(tf.crop.height / 2) * 2}:${Math.round(tf.crop.left)}:${Math.round(tf.crop.top)}`);
+  if (tf.frame) {
+    const { width: w, height: h } = tf.frame;
+    f.push(
+      tf.frame.fit === 'cover'
+        ? `scale=${w}:${h}:force_original_aspect_ratio=increase,crop=${w}:${h}`
+        : `scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2`,
+    );
+  }
+  f.push('scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1');
+  return f;
+}
+
+/** ffmpeg filters for a level request. Normalising here is ffmpeg's one-pass loudnorm (it adapts the gain as it goes). */
+function levelFilters(level: AudioLevel, duration: number): { filters: string[]; notes: string[] } {
+  const filters: string[] = [];
+  const notes: string[] = [];
+  const ceiling = level.peakCeiling ?? -1;
+  if (level.normalize !== undefined) {
+    filters.push(`loudnorm=I=${level.normalize}:TP=${ceiling}:LRA=11`);
+    notes.push(`The software engine normalised with ffmpeg's one-pass loudnorm towards ${level.normalize} LUFS: it adjusts the gain gradually through the file rather than applying one fixed gain.`);
+  } else if (level.gainDb) {
+    filters.push(`volume=${level.gainDb}dB`, `alimiter=limit=${(10 ** (ceiling / 20)).toFixed(4)}:level=false`);
+    notes.push(`Gain ${level.gainDb >= 0 ? '+' : ''}${level.gainDb} dB; peaks above ${ceiling} dBFS are limited by the software engine.`);
+  }
+  if (level.fadeIn) filters.push(`afade=t=in:d=${level.fadeIn}:curve=qsin`);
+  if (level.fadeOut && duration > 0) filters.push(`afade=t=out:st=${Math.max(0, duration - level.fadeOut).toFixed(3)}:d=${level.fadeOut}:curve=qsin`);
+  return { filters, notes };
+}
+
 export function gifPlanArgs(req: GifRequest): FfmpegPlan {
   const pre = req.end > req.start ? ['-ss', req.start.toFixed(3), '-to', req.end.toFixed(3)] : [];
   return { pre, post: gifArgs(req.width, req.fps), ext: 'gif', video: `GIF at ${req.fps} fps`, notes: [] };
@@ -205,14 +264,14 @@ export function gifToVideoArgs(container: 'mp4' | 'webm'): FfmpegPlan {
 
 /**
  * Concatenation with re-encoding (concat filter). Every clip is scaled and
- * padded to the first clip's size and resampled to 48 kHz stereo. All clips
+ * padded to the first clip's size and resampled to 48 kHz stereo (mono when every clip is mono). All clips
  * must agree on having audio.
  */
 export function mergeArgs(
   req: MergeRequest,
   infos: (MediaInfo | null)[],
   names: string[],
-): { args: string[]; ext: string; video?: string; audio?: string } {
+): { args: string[]; ext: string; video?: string; audio?: string; audioBitrate: number } {
   const c = CONTAINERS[req.container];
   // Unreadable clips (null) are assumed to have both streams.
   const video = c.kind === 'video' && infos.some((i) => !i || i.video);
@@ -220,6 +279,9 @@ export function mergeArgs(
   const w = ref ? Math.round(ref.width / 2) * 2 : 1280;
   const h = ref ? Math.round(ref.height / 2) * 2 : 720;
   const audio = infos.some((i) => !i || i.audio !== null);
+  // Keep stereo, or mono when every clip is known to be mono.
+  const mono = infos.every((i) => i && (!i.audio || i.audio.channels === 1));
+  const layout = mono ? 'mono' : 'stereo';
   const inputs = names.flatMap((n) => ['-i', n]);
   const chains: string[] = [];
   const labels: string[] = [];
@@ -238,9 +300,9 @@ export function mergeArgs(
     if (audio) {
       if (info && !info.audio) {
         if (!(d > 0)) throw new Error('The length of a silent clip could not be read, so it cannot be joined here.');
-        chains.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${d.toFixed(3)}[a${i}]`);
+        chains.push(`anullsrc=r=48000:cl=${layout},atrim=duration=${d.toFixed(3)}[a${i}]`);
       } else {
-        chains.push(`[${i}:a]aresample=48000,aformat=channel_layouts=stereo[a${i}]`);
+        chains.push(`[${i}:a]aresample=48000,aformat=channel_layouts=${layout}[a${i}]`);
       }
       labels.push(`[a${i}]`);
     }
@@ -252,12 +314,158 @@ export function mergeArgs(
     if (req.container === 'webm') enc.push('-c:v', 'libvpx', '-deadline', 'realtime', '-cpu-used', '8', '-b:v', '2M');
     else enc.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', CRF[req.quality] ?? '23');
   }
-  if (audio) enc.push(...audioEncoder(req.container, req.audioBitrate).args);
+  // Never above the richest clip (as on the fast path), when every clip's audio is known.
+  const caps = infos.map((i) => (i?.audio ? planAudioBitrate(req.audioBitrate, i.audio).bitrate : i ? 0 : req.audioBitrate));
+  const audioBitrate = Math.max(32_000, Math.min(req.audioBitrate, Math.max(...caps)));
+  if (audio) enc.push(...audioEncoder(req.container, audioBitrate).args);
   if (req.container === 'mp4' || req.container === 'mov' || req.container === 'm4a') enc.push('-movflags', '+faststart');
   return {
     args: [...inputs, '-filter_complex', graph, ...maps, ...enc],
     ext: c.ext,
     video: video ? `Re-encoded to ${req.container === 'webm' ? 'VP8' : 'H.264'} ${w}×${h}` : undefined,
-    audio: audio ? 'Re-encoded' : undefined,
+    audio: audio ? `Re-encoded to ${audioEncoder(req.container, audioBitrate).label}, 48 kHz ${layout}` : undefined,
+    audioBitrate,
   };
+}
+
+/**
+ * Output settings for re-encoding a cut of a file only ffmpeg reads, keeping
+ * its format where the core has an encoder for it (by input extension).
+ * Others are written as MP4 (H.264/AAC), or M4A for audio.
+ */
+const SOFT_FORMATS: Record<string, { muxer: string; video?: string[]; audio: string[]; audioRate?: string }> = {
+  avi: { muxer: 'avi', video: ['-c:v', 'mpeg4'], audio: ['-c:a', 'libmp3lame'] },
+  wmv: { muxer: 'asf', video: ['-c:v', 'wmv2'], audio: ['-c:a', 'wmav2'] },
+  asf: { muxer: 'asf', video: ['-c:v', 'wmv2'], audio: ['-c:a', 'wmav2'] },
+  wma: { muxer: 'asf', audio: ['-c:a', 'wmav2'] },
+  flv: { muxer: 'flv', video: ['-c:v', 'flv'], audio: ['-c:a', 'libmp3lame'], audioRate: '44100' },
+  mpg: { muxer: 'vob', video: ['-c:v', 'mpeg2video'], audio: ['-c:a', 'mp2'] },
+  mpeg: { muxer: 'vob', video: ['-c:v', 'mpeg2video'], audio: ['-c:a', 'mp2'] },
+  vob: { muxer: 'vob', video: ['-c:v', 'mpeg2video'], audio: ['-c:a', 'mp2'] },
+  ogv: { muxer: 'ogg', video: ['-c:v', 'libtheora'], audio: ['-c:a', 'libvorbis'] },
+  // H.263 only takes the standard sizes, which an H.263 source already has.
+  '3gp': { muxer: '3gp', video: ['-c:v', 'h263'], audio: ['-c:a', 'aac'] },
+  aiff: { muxer: 'aiff', audio: ['-c:a', 'pcm_s16be'] },
+  aif: { muxer: 'aiff', audio: ['-c:a', 'pcm_s16be'] },
+};
+
+/** Display names of the encoders softTrimPlan uses. */
+const ENCODER_LABEL: Record<string, string> = {
+  mpeg4: 'MPEG-4 Part 2',
+  wmv2: 'WMV8',
+  flv: 'Sorenson Spark (FLV1)',
+  mpeg2video: 'MPEG-2',
+  libtheora: 'Theora',
+  h263: 'H.263',
+  libmp3lame: 'MP3',
+  wmav2: 'WMA v2',
+  mp2: 'MP2',
+  libvorbis: 'Vorbis',
+  aac: 'AAC',
+  pcm_s16be: 'PCM',
+};
+
+export type SoftTrimPlan = FfmpegPlan & {
+  /** Expected output size in bytes, for the engine's memory limit. */
+  expectedBytes: number;
+};
+
+/**
+ * A cut of a file only ffmpeg reads. Fast mode copies the streams into the
+ * same format (starting at the key frame before the in point); precise mode
+ * re-encodes from the in point, at the source's bitrates or lower.
+ */
+export function softTrimPlan(info: MediaInfo, ext: string, range: { start: number; end: number; accurate: boolean }): SoftTrimPlan {
+  const length = Math.max(0.05, range.end - range.start);
+  const maps = [...(info.video ? ['-map', '0:v:0'] : []), ...(info.audio ? ['-map', '0:a:0'] : [])];
+  const notes: string[] = [];
+  const fraction = info.duration > 0 ? Math.min(1, length / info.duration) : 1;
+  // MPEG-PS video opens each group with frames that lean on the previous one, and Ogg Theora pages carry
+  // positions a copied cut cannot restate: copied cuts of either drift out of sync by 0.1–0.2 s (measured),
+  // so these files are always cut by re-encoding.
+  const program = ext === 'mpg' || ext === 'mpeg' || ext === 'vob' || ext === 'ogv';
+  const accurate = range.accurate || (program && !!info.video);
+  if (!range.accurate && accurate) {
+    notes.push(`${ext === 'ogv' ? 'Ogg Theora video' : 'MPEG program streams'} cannot be cut cleanly without re-encoding, so this cut was made frame-accurately.`);
+  }
+  if (!accurate) {
+    // Up to a key-frame interval more than the selection (10 s is generous), plus container slack.
+    const extra = info.duration > 0 ? Math.min(1, 10 / info.duration) : 0;
+    // ASF seeks by its index, which lands up to a second early and throws off -t: seek near, then cut exactly
+    // (copying starts at the first key frame from the in point).
+    const asf = ext === 'wmv' || ext === 'asf' || ext === 'wma';
+    const near = asf ? Math.max(0, range.start - 10) : range.start;
+    return {
+      pre: ['-ss', near.toFixed(3)],
+      post: [...(asf ? ['-ss', (range.start - near).toFixed(3)] : []), '-t', length.toFixed(3), ...maps, '-c', 'copy', '-avoid_negative_ts', 'make_zero'],
+      ext,
+      video: info.video ? 'Copied without re-encoding' : undefined,
+      audio: info.audio ? 'Copied without re-encoding' : undefined,
+      notes: info.video
+        ? [
+            asf
+              ? 'Fast mode copies the streams; the picture starts at the first key frame from the in point.'
+              : 'Fast mode copies from the key frame before the in point, so the clip may start slightly early.',
+          ]
+        : [],
+      expectedBytes: Math.round(info.size * Math.min(1, fraction + extra) * 1.05) + 1_000_000,
+    };
+  }
+  const pre = ['-ss', range.start.toFixed(3)];
+  const fmt = SOFT_FORMATS[ext];
+  const keep = !!fmt && (!info.video || !!fmt.video) && (ext !== '3gp' || info.video?.label === 'H.263');
+  const outExt = keep ? ext : info.video ? 'mp4' : 'm4a';
+  const post = ['-t', length.toFixed(3), ...maps];
+  let video: string | undefined;
+  let audio: string | undefined;
+  let videoBits = 0;
+  if (info.video) {
+    // Same codec family as the source at its bitrate (H.264 at 70% of it when the format changes).
+    const src = info.video.bitrate ?? 2_000_000;
+    if (keep) {
+      post.push(...fmt.video!, '-b:v', String(src), '-maxrate', String(Math.round(src * 1.5)), '-bufsize', String(src * 2));
+      if (fmt.video![1] === 'mpeg4') post.push('-vtag', 'xvid');
+      videoBits = src;
+      video = `Re-encoded to ${ENCODER_LABEL[fmt.video![1]!]} at ${formatBitrate(src)}`;
+    } else {
+      const rate = Math.max(300_000, Math.round(src * 0.7));
+      post.push('-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-b:v', String(rate), '-maxrate', String(Math.round(rate * 1.5)), '-bufsize', String(rate * 2), '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2');
+      videoBits = rate;
+      video = `Re-encoded to H.264 at ${formatBitrate(rate)}`;
+    }
+  }
+  let audioBits = 0;
+  if (info.audio) {
+    const lossless = keep && fmt.muxer === 'aiff';
+    const rate = Math.min(info.audio.bitrate ?? 192_000, 192_000);
+    const ab = commonBitrate(rate);
+    if (keep) {
+      post.push(...fmt.audio);
+      if (!lossless) post.push('-b:a', `${Math.round(ab / 1000)}k`);
+      if (fmt.audioRate) post.push('-ar', fmt.audioRate);
+    } else {
+      post.push('-c:a', 'aac', '-b:a', `${Math.round(ab / 1000)}k`);
+    }
+    audioBits = lossless ? (info.audio.sampleRate || 48000) * 16 * Math.max(1, info.audio.channels) : ab;
+    audio = lossless ? 'Re-encoded to PCM' : `Re-encoded to ${keep ? ENCODER_LABEL[fmt.audio[1]!] : 'AAC'} ${formatBitrate(ab)}`;
+  }
+  if (keep && fmt.muxer === 'vob') post.push('-f', 'vob');
+  if (outExt === 'mp4' || outExt === 'm4a') post.push('-movflags', '+faststart');
+  if (!keep) {
+    notes.push(`The software engine cannot write ${ext.toUpperCase()} with these codecs, so the frame-accurate cut is saved as ${outExt.toUpperCase()}. Fast mode keeps the format.`);
+  }
+  return {
+    pre,
+    post,
+    ext: outExt,
+    video,
+    audio,
+    notes,
+    expectedBytes: Math.round(((videoBits + audioBits) * length) / 8 * 1.3) + 1_000_000,
+  };
+}
+
+function commonBitrate(bps: number): number {
+  const steps = [192_000, 160_000, 128_000, 112_000, 96_000, 80_000, 64_000, 48_000, 32_000];
+  return steps.find((b) => b <= bps * 1.05) ?? 32_000;
 }

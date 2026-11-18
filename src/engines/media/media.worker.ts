@@ -51,6 +51,7 @@ import {
 import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import { BlobSink } from './blob-sink';
 import { type SpeedProcessor, TapeResampler, TimeStretcher } from './dsp';
+import { LoudnessMeter } from './loudness';
 import {
   CONTAINERS,
   COMMON_AUDIO_BITRATES,
@@ -60,12 +61,14 @@ import {
   fitShortSide,
   capFps,
   formatBitrate,
+  MIN_VIDEO_BITRATE,
   planAudioBitrate,
   planVideo,
   videoCodecLabel,
 } from './presets';
 import type {
   AudioCodecId,
+  AudioLevel,
   Capabilities,
   Container,
   ConvertRequest,
@@ -74,7 +77,11 @@ import type {
   GifToVideoRequest,
   MediaInfo,
   MergeRequest,
+  TrimRequest,
+  FramesRequest,
+  FramesResult,
   VideoCodecId,
+  VideoTransform,
   WorkerOutcome,
 } from './types';
 
@@ -221,7 +228,11 @@ async function describe(input: Input, file: File): Promise<MediaInfo> {
       fps = null;
     }
     const codec = await v.getCodec();
+    // WebCodecs names the transfers 'pq' and 'hlg' (lib.dom's type lags behind).
+    const transfer = String((await v.getColorSpace().catch(() => null))?.transfer ?? '');
+    const hdr = transfer === 'pq' ? 'pq' : transfer === 'hlg' ? 'hlg' : null;
     video = {
+      hdr,
       codec: codec as VideoCodecId | 'prores' | null,
       codedWidth: await v.getCodedWidth(),
       codedHeight: await v.getCodedHeight(),
@@ -328,6 +339,16 @@ function discardFallback(conversion: Conversion, wanted: { video: boolean; audio
   return null;
 }
 
+/**
+ * What re-encoding does to an HDR source here: WebCodecs encodes 8-bit and the
+ * HDR colour tags (BT.2020, PQ/HLG) stay on the output, so HDR-aware players
+ * show the right brightness and colour, with a little banding in smooth
+ * gradients; players without HDR support show it pale.
+ */
+function hdrNote(hdr: 'pq' | 'hlg', codec: VideoCodecId): string {
+  return `This is an HDR video (${hdr === 'pq' ? 'HDR10 / PQ' : 'HLG'}). It was re-encoded as 8-bit ${videoCodecLabel(codec)} and keeps its HDR colour tags: HDR-aware players (phones, browsers, TVs) show it correctly, possibly with slight banding in smooth gradients; players without HDR support show it washed out. Fast trims and Copy keep the original 10-bit stream.`;
+}
+
 /** Half a frame: how far a copied cut may start from the requested time and still count as exact. */
 function copyTolerance(fps: number | null): number {
   return 0.5 / (fps && fps > 0 ? fps : 30);
@@ -335,6 +356,21 @@ function copyTolerance(fps: number | null): number {
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Average bitrate of the primary video track of a finished output, from its packet sizes. */
+async function measuredVideoBitrate(blob: Blob): Promise<number | null> {
+  const input = openInput(blob);
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) return null;
+    const stats = await track.computePacketStats();
+    return stats.averageBitrate > 0 ? stats.averageBitrate : null;
+  } catch {
+    return null;
+  } finally {
+    input.dispose();
+  }
 }
 
 // ── Speed (process callbacks) ──────────────────────────────────────────────
@@ -392,6 +428,241 @@ function speedAudio(factor: number, keepPitch: boolean, trackStart: number, trac
   };
 }
 
+// ── MP3 cut without re-encoding ────────────────────────────────────────────
+
+/** LAME tag limits: 12-bit fields, and decoders add 529 samples of their own delay to the start one. */
+const LAME_MAX_DELAY = 0xfff;
+const MP3_DECODER_DELAY = 529;
+
+/** LAME's tag CRC (CRC-16, reflected 0x8005) over the first 190 bytes of the info frame. */
+function lameCrc(bytes: Uint8Array): number {
+  let crc = 0;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xa001 : 0);
+  }
+  return crc;
+}
+
+function findAscii(bytes: Uint8Array, text: string, from = 0): number {
+  outer: for (let i = from; i + text.length <= bytes.length; i++) {
+    for (let k = 0; k < text.length; k++) if (bytes[i + k] !== text.charCodeAt(k)) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/**
+ * Makes an MP3 that Mediabunny wrote end on the right sample: sets the LAME
+ * tag's end padding (Mediabunny writes "no end trim") so gapless decoders drop
+ * what follows the out point, and the Xing frame count to the audio frames
+ * only (Mediabunny counts its own info frame too, which makes decoders ignore
+ * the padding). `samples` is how many samples the file should play.
+ */
+async function trimMp3Tail(blob: Blob, samples: number, sampleRate: number): Promise<Blob> {
+  const head = new Uint8Array(await blob.slice(0, 1024).arrayBuffer());
+  const xing = Math.max(findAscii(head, 'Xing'), findAscii(head, 'Info'));
+  const lame = xing >= 0 ? findAscii(head, 'LAME', xing) : -1;
+  if (xing < 0 || lame < 0 || lame + 36 > head.length) return blob;
+  const view = new DataView(head.buffer);
+  if (!(view.getUint32(xing + 4) & 1)) return blob; // No frame count.
+  const frameSamples = sampleRate >= 32000 ? 1152 : 576;
+  const audioFrames = view.getUint32(xing + 8) - 1;
+  const delay = ((head[lame + 21]! << 4) | (head[lame + 22]! >> 4)) + MP3_DECODER_DELAY;
+  const excess = audioFrames * frameSamples - delay - Math.round(samples);
+  if (excess < 0 || excess + MP3_DECODER_DELAY > LAME_MAX_DELAY) return blob;
+  const pad = excess + MP3_DECODER_DELAY;
+  // The CRC runs from the info frame's header: the last frame sync before the Xing tag.
+  let frame = xing - 4;
+  while (frame > 0 && !(head[frame] === 0xff && (head[frame + 1]! & 0xe0) === 0xe0)) frame--;
+  view.setUint32(xing + 8, audioFrames);
+  head[lame + 22] = (head[lame + 22]! & 0xf0) | (pad >> 8);
+  head[lame + 23] = pad & 0xff;
+  view.setUint16(lame + 34, lameCrc(head.subarray(frame, lame + 34)));
+  return new Blob([head.subarray(0, lame + 36), blob.slice(lame + 36)], { type: blob.type });
+}
+
+/**
+ * Fast-mode MP3 cut: copies whole MP3 frames (no re-encoding) from three
+ * frames before the in point (the bit reservoir reaches back about that far)
+ * to the frame holding the out point, and records in the LAME tag how many
+ * samples gapless decoders skip at the start and drop at the end. Players
+ * that honour the tag (browsers, ffmpeg, most music players) start and stop
+ * on the exact sample; the rest play at most one frame (26 ms) more at each end.
+ */
+async function mp3CopyTrim(input: Input, info: MediaInfo, trim: TrimRequest, progress: Progress): Promise<WorkerOutcome | null> {
+  const track = await input.getPrimaryAudioTrack();
+  if (!track || (await track.getCodec()) !== 'mp3') return null;
+  const rate = await track.getSampleRate();
+  const sink = new EncodedPacketSink(track);
+  const start = info.startTime + trim.start;
+  const end = info.startTime + Math.min(trim.end, info.duration);
+  const holding = (await sink.getPacket(start)) ?? (await sink.getFirstPacket());
+  if (!holding) throw new Error('This file has no audio frames in that range.');
+  const frame = holding.duration || 1152 / rate;
+  // As many frames of lead-in as the LAME delay field can describe (up to 3).
+  let first = holding;
+  for (let k = 3; k >= 1; k--) {
+    const p = await sink.getPacket(holding.timestamp - k * frame + frame / 2);
+    if (p && (start - p.timestamp) * rate <= LAME_MAX_DELAY + MP3_DECODER_DELAY) {
+      first = p;
+      break;
+    }
+  }
+  const lead = Math.round((start - first.timestamp) * rate);
+  if (lead < MP3_DECODER_DELAY) return null; // At the very start of the file: the regular copy is exact enough.
+
+  const format = new Mp3OutputFormat();
+  const { output, sink: out } = makeOutput(format);
+  const source = new EncodedAudioPacketSource('mp3');
+  output.addAudioTrack(source);
+  await output.start();
+  const config = await track.getDecoderConfig();
+  let last = first;
+  let firstPacket = true;
+  for await (const packet of sink.packets(first)) {
+    if (packet.timestamp >= end) break;
+    await source.add(packet.clone({ timestamp: packet.timestamp - start }), firstPacket && config ? { decoderConfig: config } : undefined);
+    firstPacket = false;
+    last = packet;
+    progress((packet.timestamp - first.timestamp) / Math.max(1e-3, end - first.timestamp));
+  }
+  source.close();
+  await output.finalize();
+  const blob = await trimMp3Tail(out.finish(format.mimeType), (Math.min(end, last.timestamp + last.duration) - start) * rate, rate);
+  return {
+    ok: true,
+    blob,
+    ext: 'mp3',
+    audio: 'Copied MP3 frames without re-encoding',
+    notes: [
+      'Cut on the exact sample: whole MP3 frames are copied and the LAME tag tells players how much to skip at each end (players that ignore it play up to 26 ms more).',
+    ],
+  };
+}
+
+// ── Picture transforms ─────────────────────────────────────────────────────
+
+/** Output size after turning, cropping and reframing (even numbers). */
+function transformedSize(width: number, height: number, tf: VideoTransform): { width: number; height: number; scaled: boolean } {
+  const turned = tf.rotate === 90 || tf.rotate === 270;
+  let w = turned ? height : width;
+  let h = turned ? width : height;
+  if (tf.crop) {
+    w = Math.min(w, tf.crop.width);
+    h = Math.min(h, tf.crop.height);
+  }
+  if (tf.frame) {
+    w = tf.frame.width;
+    h = tf.frame.height;
+  }
+  return { width: even(w), height: even(h), scaled: true };
+}
+
+/** Mediabunny's options: it turns, then mirrors left to right, then crops. Upside down = half a turn plus a mirror. */
+function transformOptions(tf: VideoTransform): Partial<ConversionVideoOptions> {
+  const rotate = (((tf.rotate ?? 0) + (tf.flipVertical ? 180 : 0)) % 360) as 0 | 90 | 180 | 270;
+  const flip = !!tf.flipHorizontal !== !!tf.flipVertical;
+  const out: Partial<ConversionVideoOptions> = { allowTransformationMetadata: false };
+  if (rotate) out.rotate = rotate;
+  if (flip) out.flip = true;
+  if (tf.crop) {
+    out.crop = { left: Math.round(tf.crop.left), top: Math.round(tf.crop.top), width: even(tf.crop.width), height: even(tf.crop.height) };
+  }
+  return out;
+}
+
+function describeTransform(tf: VideoTransform): string {
+  const parts: string[] = [];
+  if (tf.rotate) parts.push(`turned ${tf.rotate}°`);
+  if (tf.flipHorizontal) parts.push('mirrored');
+  if (tf.flipVertical) parts.push('flipped upside down');
+  if (tf.crop) parts.push(`cropped to ${even(tf.crop.width)}×${even(tf.crop.height)}`);
+  if (tf.frame) parts.push(tf.frame.fit === 'cover' ? 'filled the frame, edges cropped' : 'fitted in the frame with black bars');
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
+// ── Volume ─────────────────────────────────────────────────────────────────
+
+const toDb = (x: number) => 20 * Math.log10(Math.max(x, 1e-9));
+
+/**
+ * The linear gain for a level request: from a loudness measurement (one
+ * decoding pass) or the fixed gain, held under the peak ceiling (no limiter).
+ */
+async function levelPlan(input: Input, level: AudioLevel, onProgress?: Progress): Promise<{ gain: number; notes: string[] }> {
+  const notes: string[] = [];
+  const ceiling = level.peakCeiling ?? -1;
+  const track = await input.getPrimaryAudioTrack();
+  if (!track) return { gain: 1, notes };
+  const duration = (await track.computeDuration()) || 1;
+  let meter: LoudnessMeter | null = null;
+  const report = throttled(onProgress);
+  for await (const sample of new AudioSampleSink(track).samples()) {
+    meter ??= new LoudnessMeter(sample.numberOfChannels, sample.sampleRate);
+    const planes: Float32Array[] = [];
+    for (let c = 0; c < sample.numberOfChannels; c++) {
+      const plane = new Float32Array(sample.numberOfFrames);
+      sample.copyTo(plane, { planeIndex: c, format: 'f32-planar' });
+      planes.push(plane);
+    }
+    meter.push(planes);
+    report((0.3 * (sample.timestamp + sample.duration)) / duration);
+    sample.close();
+  }
+  const peakDb = meter ? toDb(meter.peak) : -Infinity;
+  const lufs = meter?.integrated() ?? null;
+  let gainDb = level.gainDb ?? 0;
+  if (level.normalize !== undefined) {
+    if (lufs === null) {
+      notes.push('The audio is silent (or under half a second long), so its loudness could not be measured; the level is unchanged.');
+      gainDb = 0;
+    } else {
+      gainDb = level.normalize - lufs;
+      notes.push(`Measured ${lufs.toFixed(1)} LUFS integrated (EBU R128), sample peak ${peakDb.toFixed(1)} dBFS.`);
+    }
+  }
+  if (gainDb > 0 && peakDb + gainDb > ceiling) {
+    const limited = Math.max(0, ceiling - peakDb);
+    notes.push(
+      `Raising the level by ${gainDb.toFixed(1)} dB would push peaks over ${ceiling} dBFS and clip, so the gain was held at +${limited.toFixed(1)} dB${lufs !== null ? ` (about ${(lufs + limited).toFixed(1)} LUFS)` : ''}. No limiter or compressor is applied.`,
+    );
+    gainDb = limited;
+  } else if (level.normalize !== undefined && lufs !== null) {
+    notes.push(`Gain ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB to reach ${level.normalize} LUFS.`);
+  } else if (gainDb) {
+    notes.push(`Gain ${gainDb >= 0 ? '+' : ''}${gainDb.toFixed(1)} dB${Number.isFinite(peakDb) ? `; peaks now ${(peakDb + gainDb).toFixed(1)} dBFS` : ''}.`);
+  }
+  if (level.fadeIn) notes.push(`Fades in over ${level.fadeIn} s.`);
+  if (level.fadeOut) notes.push(`Fades out over the last ${level.fadeOut} s.`);
+  return { gain: 10 ** (gainDb / 20), notes };
+}
+
+/** Multiplies every sample by the gain and the fade envelope (quarter-sine curves). */
+function levelProcess(gain: number, fadeIn: number, fadeOut: number, start: number, end: number) {
+  return (sample: AudioSample): AudioSample => {
+    const n = sample.numberOfFrames;
+    const ch = sample.numberOfChannels;
+    const rate = sample.sampleRate;
+    const data = new Float32Array(n * ch);
+    for (let c = 0; c < ch; c++) sample.copyTo(data.subarray(c * n, (c + 1) * n), { planeIndex: c, format: 'f32-planar' });
+    for (let i = 0; i < n; i++) {
+      const t = sample.timestamp + i / rate;
+      let g = gain;
+      if (fadeIn > 0 && t - start < fadeIn) g *= Math.sin((Math.max(0, t - start) / fadeIn) * (Math.PI / 2));
+      if (fadeOut > 0 && end - t < fadeOut) g *= Math.sin((Math.max(0, end - t) / fadeOut) * (Math.PI / 2));
+      if (g === 1) continue;
+      for (let c = 0; c < ch; c++) {
+        const k = c * n + i;
+        data[k] = Math.max(-1, Math.min(1, data[k]! * g));
+      }
+    }
+    const out = new AudioSample({ data, format: 'f32-planar', numberOfChannels: ch, sampleRate: rate, timestamp: sample.timestamp });
+    sample.close();
+    return out;
+  };
+}
+
 // ── Convert ────────────────────────────────────────────────────────────────
 
 async function convert(file: File, req: ConvertRequest, onProgress?: Progress): Promise<WorkerOutcome> {
@@ -416,6 +687,13 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
 
   const speed = req.speed && Math.abs(req.speed.factor - 1) > 1e-3 ? req.speed : undefined;
   const trim = req.trim;
+  if (
+    trim && !trim.accurate && req.container === 'mp3' && !wantVideo && info.audio?.codec === 'mp3' &&
+    req.audio?.bitrate === 'copy' && !speed && !req.audio?.sampleRate && !req.audio?.channels && (!req.audio?.codec || req.audio.codec === 'auto' || req.audio.codec === 'mp3')
+  ) {
+    const cut = await mp3CopyTrim(input, info, trim, throttled(onProgress));
+    if (cut) return cut;
+  }
   // Speed changes the packet count, which a reserved MP4 header cannot predict.
   const format = makeFormat(req.container, speed ? false : 'reserve');
   const notes: string[] = [];
@@ -424,10 +702,16 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
 
   // Video
   let videoOpts: ConversionVideoOptions = { discard: true };
+  /** The video bitrate asked of the encoder when re-encoding (for the rate check). */
+  let videoTarget = 0;
   if (wantVideo && info.video) {
     const v = info.video;
     const vr = req.video ?? {};
-    const shape = fitShortSide(v.width, v.height, vr.maxShortSide);
+    const tf = vr.transform;
+    // Turning alone can be stored as rotation metadata; mirroring, cropping and reframing need new frames.
+    const reframes = !!tf && (!!tf.flipHorizontal || !!tf.flipVertical || !!tf.crop || !!tf.frame);
+    const turn = tf?.rotate ?? 0;
+    const shape = tf ? transformedSize(v.width, v.height, tf) : fitShortSide(v.width, v.height, vr.maxShortSide);
     const fpsCap = capFps(v.fps, speed && speed.factor > 1 ? (v.fps ?? 30) / speed.factor : vr.maxFps);
     const srcCodec = v.codec;
     const copyWanted = (vr.quality ?? 'balanced') === 'copy' && !vr.bitrate;
@@ -436,7 +720,8 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
     const accurateTrim = !!trim && trim.accurate;
     // Copied frames keep their stored orientation, so the container must be able to say how to turn them.
     const rotationFits = v.rotation === 0 || format.supportsVideoRotationMetadata;
-    let copy = codecFits && rotationFits && !shape.scaled && !fpsCap && !speed && (copyWanted || (!!trim && !trim.accurate));
+    let copy = codecFits && rotationFits && (!shape.scaled || (!!tf && !reframes)) && !fpsCap && !speed && !reframes &&
+      (!turn || format.supportsVideoRotationMetadata) && (copyWanted || (!!trim && !trim.accurate));
     if (!rotationFits && (copyWanted || (!!trim && !trim.accurate))) {
       notes.push(`${CONTAINERS[req.container].label} cannot store rotation, so the ${v.rotation}° turn was applied to the frames (re-encoded).`);
     }
@@ -451,8 +736,10 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
       if (!copy) notes.push('The in point is not on a key frame, so the video was re-encoded for a frame-accurate cut.');
     }
     if (copy) {
-      videoOpts = {};
-      videoDesc = `Copied ${videoCodecLabel(srcCodec)} ${v.width}×${v.height} without re-encoding`;
+      videoOpts = turn ? { rotate: turn } : {};
+      videoDesc = turn
+        ? `Copied ${videoCodecLabel(srcCodec)} without re-encoding; turned ${turn}° with rotation metadata (${shape.width}×${shape.height})`
+        : `Copied ${videoCodecLabel(srcCodec)} ${v.width}×${v.height} without re-encoding`;
     } else {
       if (!v.canDecode) return fallback('video-decode', `decode ${videoCodecLabel(srcCodec)} video`);
       // Trims keep the source codec when it can be encoded here.
@@ -468,9 +755,9 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
       }
       const quality = accurateTrim || speed ? (vr.quality === 'copy' || !vr.quality ? 'high' : vr.quality) : vr.quality;
       const plan = planVideo(
-        { ...v, fps: fpsCap ?? v.fps },
+        { ...v, width: shape.width, height: shape.height, fps: fpsCap ?? v.fps },
         codec,
-        { quality, bitrate: vr.bitrate, maxShortSide: vr.maxShortSide },
+        { quality, bitrate: vr.bitrate, maxShortSide: tf ? undefined : vr.maxShortSide },
       );
       if (plan.cappedAt) notes.push(`Video bitrate held at the source's ${formatBitrate(plan.cappedAt)} (re-encoding cannot add detail).`);
       if (vr.maxShortSide && !shape.scaled && Math.min(v.width, v.height) < vr.maxShortSide) {
@@ -480,10 +767,12 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
         codec,
         width: shape.width,
         height: shape.height,
-        fit: 'fill',
+        fit: tf?.frame?.fit ?? 'fill',
         quality: new Quality({ bitrate: plan.bitrate }),
         forceTranscode: true,
       };
+      if (tf) Object.assign(videoOpts, transformOptions(tf));
+      videoTarget = plan.bitrate;
       if (fpsCap) videoOpts.frameRate = fpsCap;
       if (speed) {
         const f = speed.factor;
@@ -493,17 +782,20 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
           return sample;
         };
       }
+      if (v.hdr) notes.push(hdrNote(v.hdr, codec));
       const outFps = speed ? (fpsCap ?? v.fps ?? 30) * speed.factor : (fpsCap ?? v.fps);
-      videoDesc = `Re-encoded to ${videoCodecLabel(codec)} ${shape.width}×${shape.height}${outFps ? ` ${Math.round(outFps * 100) / 100} fps` : ''} at ${formatBitrate(plan.bitrate)}`;
+      videoDesc = `Re-encoded to ${videoCodecLabel(codec)} ${shape.width}×${shape.height}${outFps ? ` ${Math.round(outFps * 100) / 100} fps` : ''} at ${formatBitrate(plan.bitrate)}${tf ? describeTransform(tf) : ''}`;
     }
   }
 
   // Audio
   let audioOpts: ConversionAudioOptions = { discard: true };
+  let outRate = 0;
+  let freshAudioProcess: (() => ConversionAudioOptions['process']) | null = null;
   if (wantAudio && info.audio) {
     const a = info.audio;
     const ar = req.audio ?? {};
-    const changesFormat = !!ar.sampleRate || !!ar.channels;
+    const changesFormat = !!ar.sampleRate || !!ar.channels || !!ar.level;
     const copy = !speed && !changesFormat && !(trim && trim.accurate) &&
       (ar.bitrate === 'copy' || (!!trim && !trim.accurate)) &&
       (!ar.codec || ar.codec === 'auto' || ar.codec === a.codec) &&
@@ -527,6 +819,7 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
       const plan = lossless ? { bitrate: 0 } : planAudioBitrate(wanted, a);
       const channels = ar.channels ?? (a.channels > 2 && (codec === 'opus' || codec === 'mp3' || codec === 'aac') ? 2 : undefined);
       const sampleRate = encoderSampleRate(codec, a.sampleRate, ar.sampleRate);
+      outRate = sampleRate ?? a.sampleRate;
       const encoder = await resolveAudioEncoder(
         codec,
         channels ?? a.channels,
@@ -549,6 +842,8 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
         const tStart = aTrack ? await aTrack.getFirstTimestamp() : 0;
         const tEnd = aTrack ? await aTrack.computeDuration() : info.duration;
         audioOpts.process = speedAudio(speed.factor, speed.keepPitch, tStart, tEnd);
+        // The time-stretcher keeps state: a second pass needs a fresh one.
+        freshAudioProcess = () => speedAudio(speed.factor, speed.keepPitch, tStart, tEnd);
         audioOpts.processedSampleRate = sampleRate ?? a.sampleRate;
         audioOpts.processedNumberOfChannels = channels ?? a.channels;
         notes.push(
@@ -557,43 +852,78 @@ async function convertInput(input: Input, file: File, req: ConvertRequest, onPro
             : 'Audio is resampled like a tape, so its pitch changes with the speed.',
         );
       }
+      if (ar.level && !speed) {
+        const level = ar.level;
+        const lv = await levelPlan(input, level, onProgress);
+        notes.push(...lv.notes);
+        const aTrack = await input.getPrimaryAudioTrack();
+        const tStart = aTrack ? await aTrack.getFirstTimestamp() : 0;
+        const tEnd = tStart + info.duration;
+        const make = () => levelProcess(lv.gain, level.fadeIn ?? 0, level.fadeOut ?? 0, tStart, tEnd);
+        audioOpts.process = make();
+        freshAudioProcess = make;
+      }
       const wasm = encoder.wasm ? ' (WASM encoder: the browser has none for this setting)' : '';
       const rate = sampleRate ?? a.sampleRate;
       audioDesc = `Re-encoded to ${audioCodecLabel(codec)}${lossless ? '' : ` ${formatBitrate(plan.bitrate)}`} ${Math.round(rate / 100) / 10} kHz${channels ? `, ${channels === 1 ? 'mono' : channels === 2 ? 'stereo' : `${channels} ch`}` : ''}${wasm}`;
     }
   }
 
-  const { output, sink } = makeOutput(format);
-  const options: ConversionOptions = {
-    input,
-    output,
-    tracks: 'primary',
-    video: videoOpts,
-    audio: audioOpts,
-    showWarnings: false,
+  const execute = async (vOpts: ConversionVideoOptions, aOpts: ConversionAudioOptions, report: Progress): Promise<Blob | WorkerOutcome> => {
+    const fmt = makeFormat(req.container, speed ? false : 'reserve');
+    const { output, sink } = makeOutput(fmt);
+    const options: ConversionOptions = { input, output, tracks: 'primary', video: vOpts, audio: aOpts, showWarnings: false };
+    if (trim) {
+      options.trim = { start: info.startTime + trim.start, end: info.startTime + trim.end };
+      options.copy = trim.accurate
+        ? { boundaryTolerance: copyTolerance(info.video?.fps ?? null) }
+        : { boundaryPolicy: 'expand', shiftTolerance: Infinity };
+    } else {
+      options.copy = { shiftTolerance: Infinity };
+    }
+    const conversion = await Conversion.init(options);
+    const bad = discardFallback(conversion, { video: wantVideo, audio: wantAudio });
+    if (bad) return bad;
+    if (!conversion.isValid) return fallback('webcodecs-error', 'set up this conversion');
+    conversion.onProgress = (p) => report(p);
+    try {
+      await conversion.execute();
+    } catch (err) {
+      return fallback('webcodecs-error', `finish (${errorText(err)})`);
+    }
+    return sink.finish(fmt.mimeType);
   };
-  if (trim) {
-    options.trim = { start: info.startTime + trim.start, end: info.startTime + trim.end };
-    options.copy = trim.accurate
-      ? { boundaryTolerance: copyTolerance(info.video?.fps ?? null) }
-      : { boundaryPolicy: 'expand', shiftTolerance: Infinity };
-  } else {
-    options.copy = { shiftTolerance: Infinity };
-  }
-  const conversion = await Conversion.init(options);
-  const bad = discardFallback(conversion, { video: wantVideo, audio: wantAudio });
-  if (bad) return bad;
-  if (!conversion.isValid) return fallback('webcodecs-error', 'set up this conversion');
-  conversion.onProgress = (p) => progress(p);
-  try {
-    await conversion.execute();
-  } catch (err) {
-    return fallback('webcodecs-error', `finish (${errorText(err)})`);
+  let first = await execute(videoOpts, audioOpts, videoTarget ? (p) => progress(p * 0.98) : progress);
+  if (!(first instanceof Blob)) return first;
+  // Hardware encoders overshoot the asked bitrate, most on short clips (+15–35% measured). When the video
+  // came out more than 8% over, encode once more with the bitrate scaled down by the overshoot.
+  if (videoTarget && 'quality' in videoOpts) {
+    const actual = await measuredVideoBitrate(first);
+    if (actual && actual > videoTarget * 1.08) {
+      const retry = Math.max(MIN_VIDEO_BITRATE, Math.round((videoTarget * videoTarget * 0.97) / actual));
+      const second = await execute(
+        { ...videoOpts, quality: new Quality({ bitrate: retry }) },
+        freshAudioProcess ? { ...audioOpts, process: freshAudioProcess() } : audioOpts,
+        progress,
+      );
+      if (second instanceof Blob) {
+        const after = await measuredVideoBitrate(second);
+        notes.push(
+          `The encoder overshot the ${formatBitrate(videoTarget)} video target (${formatBitrate(actual)}), so it was encoded again at ${formatBitrate(retry)}: ${after ? formatBitrate(after) : 'done'}.`,
+        );
+        first = second;
+      }
+    }
   }
   if (trim && !trim.accurate && videoDesc?.startsWith('Copied')) {
     notes.push('Fast mode cuts at the nearest key frame before the in point, so the clip may start slightly early.');
   }
-  return { ok: true, blob: sink.finish(format.mimeType), ext: CONTAINERS[req.container].ext, video: videoDesc, audio: audioDesc, notes };
+  let blob = first;
+  // Re-encoded MP3 cuts: drop the encoder's tail padding so the file ends on the out point.
+  if (req.container === 'mp3' && trim && outRate && !speed && audioDesc?.startsWith('Re-encoded')) {
+    blob = await trimMp3Tail(blob, (Math.min(trim.end, info.duration) - trim.start) * outRate, outRate);
+  }
+  return { ok: true, blob, ext: CONTAINERS[req.container].ext, video: videoDesc, audio: audioDesc, notes };
 }
 
 // ── Video to GIF ───────────────────────────────────────────────────────────
@@ -1174,7 +1504,41 @@ function recycling<A extends unknown[]>(fn: (...args: A) => Promise<WorkerOutcom
   };
 }
 
+/**
+ * Still images of the video at the given times (display orientation, the
+ * frame shown at each time), encoded by the browser. Null when the video
+ * cannot be decoded here.
+ */
+async function frames(file: File, req: FramesRequest, onProgress?: Progress): Promise<FramesResult | null> {
+  return withInput(file, async (input) => {
+    if (!(await input.canRead())) return null;
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) throw new Error('This file has no video track.');
+    if (!(await track.canDecode())) return null;
+    const progress = throttled(onProgress);
+    const start = Math.max(0, await track.getFirstTimestamp());
+    const dw = await track.getDisplayWidth();
+    const dh = await track.getDisplayHeight();
+    const width = req.maxWidth > 0 && req.maxWidth < dw ? even(req.maxWidth) : dw;
+    const height = width === dw ? dh : even((dh * width) / dw);
+    const sink = new CanvasSink(track, { width, height, fit: 'fill', poolSize: 1 });
+    const out: FramesResult['frames'] = [];
+    const type = `image/${req.format}`;
+    let i = 0;
+    for await (const frame of sink.canvasesAtTimestamps(req.times.map((t) => start + t))) {
+      const t = req.times[i]!;
+      i += 1;
+      if (!frame) continue;
+      const canvas = frame.canvas as OffscreenCanvas;
+      out.push({ time: t, blob: await canvas.convertToBlob(req.format === 'png' ? { type } : { type, quality: req.quality }) });
+      progress(i / req.times.length);
+    }
+    return { frames: out, width, height };
+  });
+}
+
 const api = {
+  frames,
   probe,
   capabilities,
   convert: recycling(convert),

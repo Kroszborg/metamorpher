@@ -9,6 +9,7 @@ export type CategoryId =
   | 'security'
   | 'image'
   | 'media'
+  | 'view'
   | 'ai'
   | 'workflow'
   | 'business'

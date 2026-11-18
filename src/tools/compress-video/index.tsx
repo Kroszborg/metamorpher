@@ -44,8 +44,9 @@ const log = createJobLog();
 
 const job = perFile<Options>(async (input, o, ctx) => {
   const media = ctx.engines.media;
-  const info = await media.probe(input.file, ctx.signal);
-  if (!info.readable) throw new Error(`${info.reason ?? 'This format cannot be read.'} Convert it to MP4 first.`);
+  // Formats only ffmpeg.wasm reads (AVI, WMV, FLV…) are measured and compressed by it, into MP4.
+  const info = await media.inspect(input.file, ctx.signal);
+  if (!info.readable && info.engine !== 'ffmpeg') throw new Error(info.reason ?? 'This format cannot be read.');
   const caps = await media.capabilities().catch(() => null);
   const { container, codec } = target(input.file, o.codec, caps);
   const settings: CompressSettings = { ...o, codec, targetBytes: o.targetMb * MB };
@@ -96,10 +97,10 @@ const job = perFile<Options>(async (input, o, ctx) => {
 });
 
 function Estimate({ input, options, caps }: { input: InputFile; options: Options; caps: Capabilities | null }) {
-  const { info } = useMediaInfo(input.file);
+  const { info } = useMediaInfo(input.file, true);
   let text = '…';
   let tone = 'text-muted-foreground';
-  if (info && !info.readable) text = 'cannot read';
+  if (info && !info.readable && info.engine !== 'ffmpeg') text = 'cannot read';
   else if (info) {
     const { codec } = target(input.file, options.codec, caps);
     const plan = planCompress(info, { ...options, codec, targetBytes: options.targetMb * MB });

@@ -71,7 +71,7 @@ export function EngineHint({
       <p className="flex items-start gap-1.5 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-[0.7rem]/relaxed text-warning">
         <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} className="mt-px size-3.5 shrink-0" />
         <span>
-          {describeFallback(reason)} The first run downloads it (about 31 MB). Files over 1 GB cannot use it.
+          {describeFallback(reason)} The first run downloads it (about 31 MB). It reads files of any size but builds the result in memory, so results over 1 GB cannot be made with it.
         </span>
       </p>
     );

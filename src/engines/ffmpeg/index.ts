@@ -52,9 +52,10 @@ function terminate(): void {
  * Largest output this engine produces. Inputs are not copied: they are mounted
  * read-only (WORKERFS) and ffmpeg reads them from the File in small pieces, so
  * any input size works. The output, though, is written to ffmpeg's in-memory
- * file system and copied out once at the end, which takes about 2.3× its size
- * in the tab's memory at the peak. Past 1 GB of output that is enough to crash
- * a tab on an ordinary 8–16 GB machine.
+ * file system and copied out once at the end: a 300 MB result raised the
+ * browser's memory by about 0.9 GB at the peak (measured), roughly 3× its
+ * size. Past 1 GB of output that is enough to crash a tab on an ordinary
+ * 8–16 GB machine.
  */
 export const FFMPEG_MAX_OUTPUT_BYTES = 1024 * 1024 * 1024;
 
