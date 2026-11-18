@@ -1,10 +1,11 @@
 'use client';
 
-import { Copy01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { Copy01Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { DrawnCheck } from '@/components/ui/drawn-check';
 import { cn } from '@/lib/utils';
 
 export function CopyButton({
@@ -43,11 +44,14 @@ export function CopyButton({
       aria-label={copied ? 'Copied' : label}
       className={cn('text-muted-foreground hover:text-foreground', className)}
     >
-      <HugeiconsIcon
-        icon={copied ? Tick02Icon : Copy01Icon}
-        strokeWidth={2}
-        className={cn(copied && 'text-primary')}
-      />
+      {copied ? (
+        // The copy icon flips to a check that pops and draws itself.
+        <span key="copied" className="grid animate-pop place-items-center text-primary">
+          <DrawnCheck className="size-3" strokeWidth={2.25} delay={40} />
+        </span>
+      ) : (
+        <HugeiconsIcon key="copy" icon={Copy01Icon} strokeWidth={2} />
+      )}
       {showLabel ? (copied ? 'Copied' : label) : null}
     </Button>
   );

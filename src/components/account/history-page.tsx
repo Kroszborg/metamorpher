@@ -5,18 +5,11 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { ConfirmDialog } from '@/components/kit/confirm-dialog';
 import { EmptyState } from '@/components/kit/empty-state';
 import { StatusBadge } from '@/components/kit/status-badge';
 import { ToolIcon } from '@/components/tools/tool-card';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -24,6 +17,7 @@ import { api } from '@/lib/account/api';
 import { forgetAccount } from '@/lib/account/session';
 import type { SyncSettings } from '@/lib/account/sync';
 import { formatBytes } from '@/lib/files';
+import { collapseOut } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getAvailableTool } from '@/tools/registry';
 import { Notice } from './form-bits';
@@ -59,53 +53,16 @@ function duration(ms: number) {
   return `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`;
 }
 
-function Confirm({
-  open,
-  onOpenChange,
-  title,
-  body,
-  action,
-  onConfirm,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  title: string;
-  body: string;
-  action: string;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100%-2rem)]">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="text-sm/relaxed">{body}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="outline" size="lg" className="h-9" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="destructive"
-            size="lg"
-            className="h-9"
-            onClick={() => {
-              onOpenChange(false);
-              onConfirm();
-            }}
-          >
-            {action}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
+const Confirm = ConfirmDialog;
+
+/** The list row for an id, for collapsing it out after a delete. */
+const rowFor = (attr: string, id: string) =>
+  document.querySelector<HTMLElement>(`[${attr}="${CSS.escape(id)}"]`);
 
 function RunRow({ run, onDelete }: { run: Run; onDelete: () => void }) {
   const tool = getAvailableTool(run.tool);
   return (
-    <li className="flex items-start gap-3 px-4 py-3.5 sm:px-5">
+    <li data-run-id={run.id} className="flex items-start gap-3 px-4 py-3.5 sm:px-5">
       {tool ? (
         <ToolIcon tool={tool} className="mt-0.5 size-8 [&_svg]:size-4" />
       ) : (
@@ -186,6 +143,7 @@ function Runs({ onSignedOut }: { onSignedOut: () => void }) {
   const remove = async (id: string) => {
     const r = await api('DELETE', `/api/me/history/${id}`);
     if (!r.ok) return toast.error(r.message);
+    await collapseOut(rowFor('data-run-id', id));
     setData((d) =>
       d
         ? {
@@ -298,7 +256,7 @@ function ChatItem({ chat, onDelete }: { chat: ChatSummary; onDelete: () => void 
     }
   };
   return (
-    <li className="px-4 py-3.5 sm:px-5">
+    <li data-chat-key={chat.docKey} className="px-4 py-3.5 sm:px-5">
       <div className="flex items-start gap-3">
         <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[0.6rem] bg-muted text-muted-foreground">
           <HugeiconsIcon icon={BubbleChatIcon} strokeWidth={1.8} className="size-4" />
@@ -321,7 +279,7 @@ function ChatItem({ chat, onDelete }: { chat: ChatSummary; onDelete: () => void 
         </Button>
       </div>
       {open ? (
-        <div className="mt-3 ml-11 flex flex-col gap-4 border-l pl-4">
+        <div className="mt-3 ml-11 flex animate-enter flex-col gap-4 border-l pl-4">
           {turns === null ? (
             <Skeleton className="h-16 w-full" />
           ) : (
@@ -366,6 +324,7 @@ function Chats({ onSignedOut }: { onSignedOut: () => void }) {
   const remove = async (c: ChatSummary) => {
     const r = await api('DELETE', `/api/me/chats/${c.docKey}`);
     if (!r.ok) return toast.error(r.message);
+    await collapseOut(rowFor('data-chat-key', c.docKey));
     setData((d) => (d ? { ...d, items: d.items.filter((x) => x.docKey !== c.docKey) } : d));
   };
 

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dropzone } from './dropzone';
 import { FileList } from './file-list';
 import { Results } from './results';
+import { runOutcome } from './outcome';
 import { RunBar } from './run-bar';
 import type { InputFile, Job } from './types';
 import { useWorkbench } from './use-workbench';
@@ -111,6 +112,7 @@ export function Workbench<O>({
             label={runLabel}
             running={wb.running}
             progress={wb.progress}
+            outcome={runOutcome(wb)}
             note={wb.note}
             disabledReason={disabledReason}
             onRun={wb.run}

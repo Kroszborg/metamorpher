@@ -53,7 +53,7 @@ export function UserActions({ id, email, disabled, self }: { id: string; email: 
               Cancel
             </Button>
             <Button
-              variant="destructive"
+              variant="danger"
               size="lg"
               className="h-9"
               onClick={() => {

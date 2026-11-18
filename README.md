@@ -5,7 +5,7 @@ and work with PDFs without uploading anything: every file is processed on your d
 
 ## Tools
 
-100 tools are available now; the list lives in
+110 tools are available now; the list lives in
 [`src/tools/registry.ts`](src/tools/registry.ts).
 
 | Area | Tools | Engines |
@@ -20,6 +20,7 @@ and work with PDFs without uploading anything: every file is processed on your d
 | Audio and video | Convert video, convert audio, compress video, trim and cut (also AVI, WMV, FLV, MPEG, OGV, 3GP, WMA), extract audio, mute, video to GIF, GIF to video, change speed, merge clips, adjust volume (LUFS normalise, gain, fades), rotate & crop, resize for social media, video to images | Mediabunny (WebCodecs), ffmpeg.wasm fallback |
 | AI | Chat with PDF (answers with page citations; PDF, Word, Markdown, text), summarize PDF (short, detailed, bullets, per chapter), transcribe audio and video (TXT/SRT/VTT) | Transformers.js + ONNX Runtime Web (WebGPU or WASM): Qwen2.5 / SmolLM2, all-MiniLM-L6-v2, Whisper; or your own API key for Anthropic, OpenAI, Gemini, Groq, OpenRouter or an OpenAI-compatible server (Ollama, LM Studio) |
 | Business and everyday | Invoice generator (India GST: GSTIN check, CGST+SGST/UTGST or IGST, HSN summary, amount in words with lakh/crore, UPI QR; or any currency), POS receipts (58/80 mm PDF and PNG cut to length), résumé builder (form with four ATS-friendly templates, or real LaTeX with five templates compiled in the browser), text to handwriting, whiteboard, QR codes and barcodes (make and read) | typeset (MuPDF HTML layout), BusyTeX (TeX Live 2026 pdfLaTeX in WebAssembly), CodeMirror 6, uqr, jsQR, JsBarcode, perfect-freehand |
+| View and play | Open any file (type read from its content, then the matching viewer and every tool that takes it); CSV and spreadsheet viewer (a million rows: sort, filter, search, column statistics, export the view); JSON, YAML, XML, TOML and NDJSON tree; text and code (50+ languages, huge logs in parts); Markdown; hex; PDF reader (thumbnails, bookmarks, search, presentation mode, passwords); Word, PowerPoint and e-book viewer (EPUB, FB2, MOBI); image viewer (HEIC, TIFF, EXIF and GPS, histogram, colour picker, animation frames, gallery, compare); media player (AVI, MKV, WMV, FLAC…: speed, A–B loop, frame steps, subtitles, volume boost, playlist); archive viewer (ZIP, TAR, GZ; preview inside, extract, ZIP passwords); subtitle viewer (SRT, VTT, ASS: reading-speed and overlap checks); font viewer (TTF, OTF, WOFF, WOFF2); SQLite viewer (read-only tables, schema and SELECT queries) | pdf.js viewer, CodeMirror 6, SheetJS CE, js-yaml, smol-toml, markdown-it + DOMPurify, MuPDF (typeset), Mediabunny + ffmpeg.wasm, fflate, sql.js |
 | Share and automate | P2P file share (WebRTC data channel, codes copied or scanned, no server), workflow builder (chain images to PDF, merge, rotate, page numbers, watermark, compress, encrypt, image resize/convert, ZIP) | WebRTC, the engines above |
 
 ## Development
@@ -122,6 +123,7 @@ src/
     ui/ kit/ layout/    design system and app shell (ported from the Bridge dashboard)
     workbench/          shared tool frame: dropzone, file list, options, run bar, results, job types
     tools/              tool cards, grid, tool host, star button
+    viewer/             the shared viewer frame (content sniffing, open with, hand-off) and one folder per viewer
   engines/              pdf, mupdf, qpdf, ghostscript, image, media, ffmpeg, archive, typeset (document → PDF)
                         and pdf-extract (PDF → Word/HTML/EPUB/Excel) engines (workers behind Comlink)
   tools/                registry.ts, categories.ts, types.ts and one folder per tool

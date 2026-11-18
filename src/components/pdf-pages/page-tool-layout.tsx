@@ -6,7 +6,7 @@ import Link from 'next/link';
 import type * as React from 'react';
 import { SectionCard } from '@/components/kit/section-card';
 import { Button } from '@/components/ui/button';
-import { Dropzone, FileList, Results, RunBar, type WorkbenchState } from '@/components/workbench';
+import { Dropzone, FileList, Results, RunBar, runOutcome, type WorkbenchState } from '@/components/workbench';
 import { PASSWORD_PROTECTED } from '@/engines/pdf';
 import { getAvailableTool } from '@/tools/registry';
 import type { PdfPreviewState } from './use-pdf-preview';
@@ -165,6 +165,7 @@ export function PageToolLayout({
             label={runLabel}
             running={wb.running}
             progress={wb.progress}
+            outcome={runOutcome(wb)}
             note={wb.note}
             disabledReason={reason}
             onRun={wb.run}

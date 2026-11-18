@@ -45,7 +45,7 @@ export function SavedTools({ kind }: { kind: 'starred' | 'recent' }) {
     );
   }
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-exit-on-unstar={kind === 'starred' ? '' : undefined}>
       <ToolCardGrid>
         {tools.map((t) => (
           <ToolCard key={t.slug} tool={toInfo(t)} showCategory />

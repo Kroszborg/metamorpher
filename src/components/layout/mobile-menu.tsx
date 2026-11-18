@@ -18,6 +18,7 @@ import { Wordmark } from '@/components/brand';
 import { openCommandPalette } from '@/components/command-palette';
 import { categoryTint } from '@/components/tools/category-tint';
 import { AUTHOR, SOURCE_URL } from '@/lib/site';
+import { DUR, usePresence } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { toolsInCategory } from '@/tools/registry';
 import type { NavGroup } from './nav-groups';
@@ -32,6 +33,8 @@ const row =
 export function MobileMenu({ groups, pathname }: { groups: NavGroup[]; pathname: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [open, setOpen] = useState(false);
+  // Keep the contents mounted while the sheet fades out.
+  const { present } = usePresence(open, DUR[2]);
 
   useEffect(() => {
     const d = dialog.current;
@@ -68,9 +71,9 @@ export function MobileMenu({ groups, pathname }: { groups: NavGroup[]; pathname:
         aria-label="Menu"
         onClose={close}
         onCancel={close}
-        className="m-0 h-dvh max-h-none w-full max-w-none bg-background p-0 text-foreground backdrop:bg-transparent open:flex open:flex-col motion-safe:open:animate-in motion-safe:open:fade-in-0 motion-safe:open:slide-in-from-top-2"
+        className="sheet fixed inset-0 z-50 m-0 h-dvh max-h-none w-full max-w-none bg-background p-0 text-foreground backdrop:bg-transparent open:flex open:flex-col"
       >
-        {open ? (
+        {present ? (
           <>
             <div className="page-container flex h-14 shrink-0 items-center justify-between border-b">
               <Link
@@ -127,7 +130,7 @@ export function MobileMenu({ groups, pathname }: { groups: NavGroup[]; pathname:
 
                 <div className="flex flex-col border-t">
                   {groups.map((g) => (
-                    <details key={g.id} name="mobile-menu-group" className="group border-b">
+                    <details key={g.id} name="mobile-menu-group" className="details-anim group border-b">
                       <summary className="flex cursor-pointer list-none items-center gap-3 rounded-lg py-4 font-display text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                         {g.label}
                         <span className="text-sm font-normal text-muted-foreground tabular-nums">{g.toolCount}</span>

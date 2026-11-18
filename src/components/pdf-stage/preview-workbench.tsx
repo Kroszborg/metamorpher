@@ -14,6 +14,7 @@ import {
   OptionSelect,
   Results,
   RunBar,
+  runOutcome,
   useWorkbench,
 } from '@/components/workbench';
 import { type PreviewRequest, pdfStamp } from '@/engines/pdf-stamp';
@@ -221,6 +222,7 @@ export function PreviewWorkbench<O>({
             label={runLabel}
             running={wb.running}
             progress={wb.progress}
+            outcome={runOutcome(wb)}
             note={wb.note}
             disabledReason={disabledReason}
             onRun={wb.run}

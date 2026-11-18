@@ -7,6 +7,7 @@ import {
   GoBackward10SecIcon,
   GoForward10SecIcon,
   InformationCircleIcon,
+  MusicNote01Icon,
   NextIcon,
   PauseIcon,
   PictureInPictureOnIcon,
@@ -485,7 +486,15 @@ export default function MediaViewer({ file, sniff, files, index, onIndex }: View
                 <p className="truncate text-xs text-muted-foreground">{info ? describeMedia(info) : sniff.format}</p>
               </div>
               <div className="relative min-h-0 flex-1">
-                {analyser ? <div className="absolute inset-0 opacity-60"><Spectrum analyser={analyser} playing={playing} /></div> : null}
+                {analyser ? (
+                  <div className="absolute inset-0 opacity-60">
+                    <Spectrum analyser={analyser} playing={playing} />
+                  </div>
+                ) : (
+                  <div className="grid h-full place-items-center text-muted-foreground/40">
+                    <HugeiconsIcon icon={MusicNote01Icon} strokeWidth={1.5} className="size-20" />
+                  </div>
+                )}
               </div>
               <svg
                 viewBox={`0 0 ${peaks?.length || 1} 100`}

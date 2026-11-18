@@ -13,7 +13,9 @@ import { Command } from 'cmdk';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useThemeSwitch } from '@/components/theme-toggle';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
+import { DUR } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { rankMatch, searchValue } from '@/lib/tool-search';
 import { getCategory } from '@/tools/categories';
@@ -46,7 +48,8 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const router = useRouter();
-  const { resolvedTheme, setTheme } = useTheme();
+  const { resolvedTheme } = useTheme();
+  const switchTheme = useThemeSwitch();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -102,8 +105,10 @@ export function CommandPalette() {
       label: resolvedTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode',
       icon: Moon02Icon,
       run: () => {
-        setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+        const next = resolvedTheme === 'dark' ? 'light' : 'dark';
         setOpen(false);
+        // Let the palette close first, then reveal the new theme from the header toggle.
+        window.setTimeout(() => switchTheme(next), DUR[2]);
       },
       keywords: ['theme', 'appearance', 'dark', 'light'],
     },

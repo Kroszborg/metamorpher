@@ -269,3 +269,22 @@ console.log(
   console.log(`[copy-runtime-assets] ONNX Runtime Web ${haveOrt} (asyncify) → public/vendor/ort`);
 }
 // ── END on-device AI ─────────────────────────────────────────────────────
+
+// ── BEGIN SQLite viewer (src/components/viewer/sqlite) ───────────────────
+// sql.js (MIT): SQLite compiled to WebAssembly, imported by the SQLite viewer's
+// worker at runtime. sql-wasm.mjs is an ES-module copy of the UMD glue:
+//   public/vendor/sqljs/sql-wasm.mjs, sql-wasm.wasm, LICENSE
+{
+  const sqlDist = join(root, 'node_modules', 'sql.js', 'dist');
+  const dir = join(vendor, 'sqljs');
+  mkdirSync(dir, { recursive: true });
+  cpSync(join(sqlDist, 'sql-wasm.wasm'), join(dir, 'sql-wasm.wasm'));
+  // The glue assigns `module = undefined`, which needs a declared binding in an ES module.
+  writeFileSync(join(dir, 'sql-wasm.mjs'), `var module, exports;
+${readFileSync(join(sqlDist, 'sql-wasm.js'), 'utf8')}
+export default initSqlJs;
+`);
+  cpSync(join(root, 'node_modules', 'sql.js', 'LICENSE'), join(dir, 'LICENSE'));
+  console.log('[copy-runtime-assets] sql.js → public/vendor/sqljs');
+}
+// ── END SQLite viewer ────────────────────────────────────────────────────

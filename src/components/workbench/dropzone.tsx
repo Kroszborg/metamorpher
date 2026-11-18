@@ -44,6 +44,8 @@ export function Dropzone({
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
+  /** Counts drops so the icon can play its short "landing" each time. */
+  const [landed, setLanded] = useState(0);
   const depth = useRef(0);
   const hintId = useId();
 
@@ -95,21 +97,27 @@ export function Dropzone({
         e.preventDefault();
         depth.current = 0;
         setOver(false);
-        if (!disabled) onFiles(Array.from(e.dataTransfer.files));
+        if (!disabled) {
+          setLanded((n) => n + 1);
+          onFiles(Array.from(e.dataTransfer.files));
+        }
       }}
       className={cn(
-        'group flex cursor-pointer items-center rounded-xl border border-dashed text-center transition-colors outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30',
+        'group flex cursor-pointer items-center rounded-xl border border-dashed text-center outline-none transition-[background-color,border-color,box-shadow] duration-(--dur-2) ease-enter focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30',
         compact ? 'gap-2 px-4 py-3 text-xs' : 'flex-col justify-center gap-3 px-6 py-12',
-        over ? 'border-primary bg-primary/5' : 'border-input bg-background hover:bg-muted/50',
+        // Drag-over: the target glows and its icon lifts toward the file.
+        over ? 'border-primary bg-primary/5 ring-4 ring-primary/10' : 'border-input bg-background hover:bg-muted/50',
         disabled && 'pointer-events-none opacity-50',
         className,
       )}
     >
       <span
+        key={landed}
         className={cn(
-          'grid shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition-colors group-hover:text-foreground',
+          'grid shrink-0 place-items-center rounded-full bg-muted text-muted-foreground transition-[color,background-color,translate,scale] duration-(--dur-2) ease-spring group-hover:text-foreground',
           compact ? 'size-7' : 'size-11',
-          over && 'bg-primary/10 text-primary',
+          over && '-translate-y-1 scale-110 bg-primary/10 text-primary',
+          landed > 0 && !over && 'animate-land',
         )}
       >
         <HugeiconsIcon icon={CloudUploadIcon} strokeWidth={2} className={compact ? 'size-4' : 'size-5'} />

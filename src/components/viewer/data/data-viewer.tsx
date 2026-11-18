@@ -597,7 +597,7 @@ export default function DataViewer({ file, sniff }: ViewerProps) {
 
       <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t bg-card px-3 py-1.5 text-xs text-muted-foreground">
         {mode === 'tree' && paths ? (
-          <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="flex min-w-0 flex-1 basis-72 items-center gap-1">
             <code className="min-w-0 truncate font-mono text-foreground" title={paths.jsonPath}>
               {paths.jsonPath}
             </code>
@@ -618,7 +618,7 @@ export default function DataViewer({ file, sniff }: ViewerProps) {
           </span>
         ) : null}
         {result.ok ? (
-          <span className="shrink-0 tabular-nums">
+          <span className="min-w-0 truncate tabular-nums">
             {sniff.format} · {result.nodes.toLocaleString()} nodes · {result.lines.toLocaleString()} lines
             {result.docs > 1 ? ` · ${result.docs} documents` : ''} · read in {Math.round(result.ms)} ms
           </span>
