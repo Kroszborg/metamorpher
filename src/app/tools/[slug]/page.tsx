@@ -1,3 +1,4 @@
+import { OG_IMAGE, SITE_NAME } from '@/lib/site';
 import { SquareLock02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { Metadata } from 'next';
@@ -25,7 +26,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description,
     keywords: [...tool.keywords],
     alternates: { canonical: `/tools/${tool.slug}` },
-    openGraph: { title: tool.title, description, url: `/tools/${tool.slug}` },
+    openGraph: { type: 'website', siteName: SITE_NAME, title: `${tool.title} · ${SITE_NAME}`, description, url: `/tools/${tool.slug}`, images: [OG_IMAGE] },
+    twitter: { card: 'summary_large_image', title: `${tool.title} · ${SITE_NAME}`, description, images: [OG_IMAGE.url] },
   };
 }
 

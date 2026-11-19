@@ -6,7 +6,7 @@ import { AppShell } from '@/components/layout/shell';
 import { Providers } from '@/components/providers';
 import { ServiceWorker } from '@/components/service-worker';
 import { Toaster } from '@/components/ui/sonner';
-import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '@/lib/site';
+import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from '@/lib/site';
 import { themeColorBootScript } from '@/lib/theme-color';
 import { cn } from '@/lib/utils';
 
@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   applicationName: SITE_NAME,
   manifest: '/manifest.json',
   appleWebApp: { capable: true, statusBarStyle: 'default', title: SITE_NAME },
-  openGraph: { type: 'website', url: '/', siteName: SITE_NAME, title: `${SITE_NAME}: every file tool, nothing uploaded`, description: SITE_DESCRIPTION },
-  twitter: { card: 'summary_large_image', title: `${SITE_NAME}: every file tool, nothing uploaded`, description: SITE_DESCRIPTION },
+  openGraph: { type: 'website', url: '/', siteName: SITE_NAME, title: `${SITE_NAME}: every file tool, nothing uploaded`, description: SITE_DESCRIPTION, images: [OG_IMAGE] },
+  twitter: { card: 'summary_large_image', title: `${SITE_NAME}: every file tool, nothing uploaded`, description: SITE_DESCRIPTION, images: [OG_IMAGE.url] },
 };
 
 // theme-color is set by the script below so it follows light/dark.
