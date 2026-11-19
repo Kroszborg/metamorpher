@@ -32,7 +32,7 @@ npm install
 npm run dev        # http://localhost:3000
 npm run typecheck
 npm run lint
-npm run build      # next build, then serwist build (offline service worker)
+npm run build      # next build, serwist build (offline service worker), then next build again so the worker ships
 npm start
 ```
 
