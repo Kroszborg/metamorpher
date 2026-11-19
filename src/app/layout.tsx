@@ -21,8 +21,8 @@ export const metadata: Metadata = {
   applicationName: SITE_NAME,
   manifest: '/manifest.json',
   appleWebApp: { capable: true, statusBarStyle: 'default', title: SITE_NAME },
-  openGraph: { type: 'website', siteName: SITE_NAME, title: SITE_NAME, description: SITE_DESCRIPTION },
-  twitter: { card: 'summary', title: SITE_NAME, description: SITE_DESCRIPTION },
+  openGraph: { type: 'website', url: '/', siteName: SITE_NAME, title: `${SITE_NAME}: every file tool, nothing uploaded`, description: SITE_DESCRIPTION },
+  twitter: { card: 'summary_large_image', title: `${SITE_NAME}: every file tool, nothing uploaded`, description: SITE_DESCRIPTION },
 };
 
 // theme-color is set by the script below so it follows light/dark.

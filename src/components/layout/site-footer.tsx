@@ -75,6 +75,11 @@ export function SiteFooter() {
             </Link>
           </li>
           <li>
+            <Link href="/terms" className={link}>
+              Terms
+            </Link>
+          </li>
+          <li>
             <UsageStatsSwitch className="pt-1" />
           </li>
         </Column>

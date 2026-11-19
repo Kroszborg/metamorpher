@@ -113,7 +113,11 @@ export function SignUpForm() {
           <Link href="/privacy" className="underline underline-offset-4 hover:text-foreground">
             privacy
           </Link>{' '}
-          for everything else.
+          for everything else. By creating an account you accept the{' '}
+          <Link href="/terms" className="underline underline-offset-4 hover:text-foreground">
+            terms
+          </Link>
+          .
         </p>
       </form>
     </AuthShell>
