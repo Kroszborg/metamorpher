@@ -48,3 +48,6 @@ next-env.d.ts
 
 # local development database (PGlite) used when DATABASE_URL is not set
 /.data/
+
+# local Claude Code settings
+/.claude/settings.local.json

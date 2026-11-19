@@ -1,6 +1,9 @@
 // Service worker build (Serwist configurator mode, which works with Turbopack).
 // `npm run build` runs `next build` and then `serwist build`, which bundles
 // src/sw.ts with a precache manifest into public/sw.js (gitignored).
+// A second `next build` then follows, because the host collects public/ while
+// `next build` runs: without it the deployed site would have no worker, or a
+// stale one whose precache list points at chunks that no longer exist.
 import { serwist } from '@serwist/next/config';
 
 export default serwist({

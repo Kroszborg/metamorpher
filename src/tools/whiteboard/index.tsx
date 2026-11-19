@@ -19,6 +19,7 @@ import {
   Move01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { useTheme } from 'next-themes';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type * as React from 'react';
 import { toast } from 'sonner';
@@ -40,7 +41,13 @@ import {
   hit,
   loadBoard,
   moved,
+  BOARD_DARK,
+  BOARD_LIGHT,
+  INK_DARK,
+  INK_LIGHT,
+  isDark,
   NOTE_COLORS,
+  reinkFor,
   resized,
   saveBoard,
   type Stroke,
@@ -50,7 +57,7 @@ import {
   type View,
 } from './model';
 
-const COLORS = ['#1c1c1c', '#1f6feb', '#d1242f', '#1a7f37', '#9a6700', '#8250df'];
+const HUES = ['#1f6feb', '#d1242f', '#1a7f37', '#9a6700', '#8250df'];
 const HIGHLIGHT = ['#ffd33d', '#7ee787', '#79c0ff', '#ff9bce'];
 const WIDTHS = [2, 4, 8];
 
@@ -98,7 +105,15 @@ export default function Whiteboard(_props: ToolProps) {
   const [els, setEls] = useState<El[]>([]);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const [tool, setTool] = useState<Tool>('pen');
-  const [color, setColor] = useState(COLORS[0]!);
+  const { resolvedTheme } = useTheme();
+  // null until the saved board or the theme decides: a dark theme starts on a black board.
+  const [background, setBackground] = useState<string | null>(null);
+  const bg = background ?? (resolvedTheme === 'light' ? BOARD_LIGHT : BOARD_DARK);
+  const dark = isDark(bg);
+  const [color, setColor] = useState<string>(INK_DARK);
+  // The neutral ink follows the board, so a new stroke is never the board's own colour.
+  const ink = color === INK_DARK || color === INK_LIGHT ? (dark ? INK_LIGHT : INK_DARK) : color;
+  const COLORS = [dark ? INK_LIGHT : INK_DARK, ...HUES];
   const [hiColor, setHiColor] = useState(HIGHLIGHT[0]!);
   const [width, setWidth] = useState(WIDTHS[1]!);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -125,6 +140,7 @@ export default function Whiteboard(_props: ToolProps) {
       if (b) {
         setEls(b.elements);
         setView(b.view);
+        if (b.background) setBackground(b.background);
       }
       setLoaded(true);
     });
@@ -132,9 +148,9 @@ export default function Whiteboard(_props: ToolProps) {
 
   useEffect(() => {
     if (!loaded) return;
-    const t = setTimeout(() => void saveBoard({ elements: els, view } satisfies Board), 500);
+    const t = setTimeout(() => void saveBoard({ elements: els, view, ...(background ? { background } : {}) } satisfies Board), 500);
     return () => clearTimeout(t);
-  }, [els, view, loaded]);
+  }, [els, view, background, loaded]);
 
   const commit = useCallback((prev: El[]) => {
     past.current.push(prev);
@@ -150,7 +166,7 @@ export default function Whiteboard(_props: ToolProps) {
     setEls(prev);
     setSelected(new Set());
     setHist({ undo: past.current.length, redo: future.current.length });
-  }, []);
+  }, [setSelected]);
 
   const redo = useCallback(() => {
     const next = future.current.pop();
@@ -197,7 +213,7 @@ export default function Whiteboard(_props: ToolProps) {
     commit(elsRef.current);
     setEls((all) => all.filter((e) => !selected.has(e.id)));
     setSelected(new Set());
-  }, [selected, commit]);
+  }, [selected, commit, setSelected]);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -266,7 +282,7 @@ export default function Whiteboard(_props: ToolProps) {
       case 'pen':
       case 'highlighter': {
         const id = uid();
-        const s: Stroke = { id, type: active === 'pen' ? 'stroke' : 'highlight', color: active === 'pen' ? color : hiColor, width, points: [[p.x, p.y, e.pointerType === 'pen' ? e.pressure : 0.5]] };
+        const s: Stroke = { id, type: active === 'pen' ? 'stroke' : 'highlight', color: active === 'pen' ? ink : hiColor, width, points: [[p.x, p.y, e.pointerType === 'pen' ? e.pressure : 0.5]] };
         setEls((all) => [...all, s]);
         gesture.current = { kind: 'draw', id };
         break;
@@ -278,14 +294,14 @@ export default function Whiteboard(_props: ToolProps) {
       case 'rect':
       case 'ellipse': {
         const id = uid();
-        setEls((all) => [...all, { id, type: active, color, width, x: p.x, y: p.y, w: 0, h: 0 }]);
+        setEls((all) => [...all, { id, type: active, color: ink, width, x: p.x, y: p.y, w: 0, h: 0 }]);
         gesture.current = { kind: 'shape', id, x: p.x, y: p.y };
         break;
       }
       case 'line':
       case 'arrow': {
         const id = uid();
-        setEls((all) => [...all, { id, type: active, color, width, x1: p.x, y1: p.y, x2: p.x, y2: p.y }]);
+        setEls((all) => [...all, { id, type: active, color: ink, width, x1: p.x, y1: p.y, x2: p.x, y2: p.y }]);
         gesture.current = { kind: 'shape', id, x: p.x, y: p.y };
         break;
       }
@@ -296,8 +312,8 @@ export default function Whiteboard(_props: ToolProps) {
         const id = uid();
         const box: Box =
           active === 'note'
-            ? { id, type: 'note', color: '#1c1c1c', width: 2, x: p.x - 90, y: p.y - 70, w: 180, h: 140, text: '', fill: NOTE_COLORS[els.filter((x) => x.type === 'note').length % NOTE_COLORS.length] }
-            : { id, type: 'text', color, width: Math.max(4, width * 1.5), x: p.x, y: p.y - 12, w: 240, h: 40, text: '' };
+            ? { id, type: 'note', color: INK_DARK, width: 2, x: p.x - 90, y: p.y - 70, w: 180, h: 140, text: '', fill: NOTE_COLORS[els.filter((x) => x.type === 'note').length % NOTE_COLORS.length] }
+            : { id, type: 'text', color: ink, width: Math.max(4, width * 1.5), x: p.x, y: p.y - 12, w: 240, h: 40, text: '' };
         commit(els);
         setEls((all) => [...all, box]);
         setSelected(new Set([id]));
@@ -467,9 +483,22 @@ export default function Whiteboard(_props: ToolProps) {
     }
   }
 
+  // A board saved before board colours existed may hold ink that matches today's board: draw it swapped.
+  const shown = reinkFor(els, bg);
+
+  /** Sets the board colour and swaps any neutral ink that would vanish on it (one undo step). */
+  function changeBoard(next: string) {
+    setBackground(next);
+    const swapped = reinkFor(els, next);
+    if (swapped !== els) {
+      commit(els);
+      setEls(swapped);
+    }
+  }
+
   async function exportAs(kind: 'png' | 'svg' | 'pdf') {
     const target = selected.size ? els.filter((x) => selected.has(x.id)) : els;
-    const out = boardSvg(target);
+    const out = boardSvg(reinkFor(target, bg), bg);
     if (!out) {
       toast.info('The board is empty.');
       return;
@@ -571,12 +600,46 @@ export default function Whiteboard(_props: ToolProps) {
             key={c}
             type="button"
             aria-label={`Colour ${c}`}
-            aria-pressed={(tool === 'highlighter' ? hiColor : color) === c}
+            aria-pressed={(tool === 'highlighter' ? hiColor : ink) === c}
             onClick={() => (tool === 'highlighter' ? setHiColor(c) : setColor(c))}
-            className={cn('size-5 rounded-full border-2', (tool === 'highlighter' ? hiColor : color) === c ? 'border-foreground' : 'border-transparent')}
-            style={{ backgroundColor: c }}
+            className={cn('size-5 rounded-full border-2', (tool === 'highlighter' ? hiColor : ink) === c ? 'border-foreground' : 'border-transparent')}
+            style={{ backgroundColor: c, boxShadow: 'inset 0 0 0 1px rgb(128 128 128 / 0.45)' }}
           />
         ))}
+        <label
+          className={cn('relative grid size-5 cursor-pointer place-items-center rounded-full border-2', !(tool === 'highlighter' ? HIGHLIGHT : COLORS).includes(tool === 'highlighter' ? hiColor : ink) ? 'border-foreground' : 'border-transparent')}
+          title="Custom colour"
+          style={{ background: 'conic-gradient(#f43f5e, #f59e0b, #22c55e, #06b6d4, #6366f1, #d946ef, #f43f5e)' }}
+        >
+          <input
+            type="color"
+            aria-label="Custom stroke colour"
+            className="absolute inset-0 size-full cursor-pointer opacity-0"
+            value={tool === 'highlighter' ? hiColor : ink}
+            onChange={(e) => (tool === 'highlighter' ? setHiColor(e.currentTarget.value) : setColor(e.currentTarget.value))}
+          />
+        </label>
+        <span className="mx-1 h-5 w-px bg-border" />
+        <span className="text-[0.7rem] text-muted-foreground">Board</span>
+        {[BOARD_DARK, BOARD_LIGHT].map((c) => (
+          <button
+            key={c}
+            type="button"
+            aria-label={c === BOARD_DARK ? 'Black board' : 'White board'}
+            title={c === BOARD_DARK ? 'Black board' : 'White board'}
+            aria-pressed={bg === c}
+            onClick={() => changeBoard(c)}
+            className={cn('size-5 rounded-md border-2', bg === c ? 'border-foreground' : 'border-transparent')}
+            style={{ backgroundColor: c, boxShadow: 'inset 0 0 0 1px rgb(128 128 128 / 0.45)' }}
+          />
+        ))}
+        <label
+          className={cn('relative grid size-5 cursor-pointer place-items-center rounded-md border-2', bg !== BOARD_DARK && bg !== BOARD_LIGHT ? 'border-foreground' : 'border-transparent')}
+          title="Custom board colour"
+          style={{ background: 'conic-gradient(#f43f5e, #f59e0b, #22c55e, #06b6d4, #6366f1, #d946ef, #f43f5e)' }}
+        >
+          <input type="color" aria-label="Custom board colour" className="absolute inset-0 size-full cursor-pointer opacity-0" value={bg} onChange={(e) => changeBoard(e.currentTarget.value)} />
+        </label>
         <span className="mx-1 h-5 w-px bg-border" />
         {WIDTHS.map((w) => (
           <button
@@ -633,7 +696,7 @@ export default function Whiteboard(_props: ToolProps) {
         </div>
       </div>
 
-      <div className="relative h-[calc(100dvh-15rem)] min-h-[26rem] overflow-hidden rounded-xl border bg-white" style={{ backgroundImage: 'radial-gradient(#d4d7de 1px, transparent 1px)', backgroundSize: `${24 * view.zoom}px ${24 * view.zoom}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
+      <div className="relative h-[calc(100dvh-15rem)] min-h-[26rem] overflow-hidden rounded-xl border" style={{ backgroundColor: bg, backgroundImage: `radial-gradient(${dark ? '#34363c' : '#d4d7de'} 1px, transparent 1px)`, backgroundSize: `${24 * view.zoom}px ${24 * view.zoom}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
         <svg
           ref={svg}
           className="absolute inset-0 size-full touch-none select-none"
@@ -649,7 +712,7 @@ export default function Whiteboard(_props: ToolProps) {
         >
           <g dangerouslySetInnerHTML={{ __html: DEFS }} />
           <g transform={`translate(${view.x} ${view.y}) scale(${view.zoom})`}>
-            {els.map((el) => (el.id === editing ? null : <ElementView key={el.id} el={el} />))}
+            {shown.map((el) => (el.id === editing ? null : <ElementView key={el.id} el={el} />))}
             {selectionBox && tool === 'select' ? (
               <g pointerEvents="none">
                 <rect x={selectionBox.x} y={selectionBox.y} width={selectionBox.w} height={selectionBox.h} fill="none" stroke="#1f6feb" strokeWidth={1 / view.zoom} strokeDasharray={`${4 / view.zoom} ${3 / view.zoom}`} />

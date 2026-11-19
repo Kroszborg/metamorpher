@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import type { NextConfig } from 'next';
 import { PHASE_DEVELOPMENT_SERVER } from 'next/constants';
 
@@ -15,6 +16,17 @@ export default function nextConfig(phase: string): NextConfig {
   const analytics = hasDb && !(env.ANALYTICS_DISABLED === '1' || env.ANALYTICS_DISABLED === 'true');
 
   return {
+    // `npm run build` runs `next build` twice around the service worker build
+    // (see serwist.config.js). The build ID names a folder the worker precaches,
+    // so both passes must agree on it: use the commit instead of a random ID.
+    generateBuildId: async () => {
+      if (env.VERCEL_GIT_COMMIT_SHA) return env.VERCEL_GIT_COMMIT_SHA;
+      try {
+        return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || 'build';
+      } catch {
+        return 'build';
+      }
+    },
     poweredByHeader: false,
     reactStrictMode: true,
     env: {

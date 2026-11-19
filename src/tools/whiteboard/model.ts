@@ -9,7 +9,28 @@ export type Box = Base & { type: 'rect' | 'ellipse' | 'text' | 'note' | 'image';
 export type Segment = Base & { type: 'line' | 'arrow'; x1: number; y1: number; x2: number; y2: number };
 export type El = Stroke | Box | Segment;
 export type View = { x: number; y: number; zoom: number };
-export type Board = { elements: El[]; view: View };
+export type Board = { elements: El[]; view: View; background?: string };
+
+/** The two neutral inks. They swap when the board flips between dark and light, so old strokes stay visible. */
+export const INK_DARK = '#1c1c1c';
+export const INK_LIGHT = '#f5f5f5';
+export const BOARD_DARK = '#0b0b0c';
+export const BOARD_LIGHT = '#ffffff';
+
+/** True when a #rrggbb colour is dark enough to need light ink on top of it. */
+export function isDark(hex: string): boolean {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return false;
+  const n = parseInt(m[1]!, 16);
+  return 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255) < 128;
+}
+
+/** Elements with the neutral ink that would vanish on `background` swapped for the other one. Notes keep their own ink. */
+export function reinkFor(els: El[], background: string): El[] {
+  const from = isDark(background) ? INK_DARK : INK_LIGHT;
+  const to = isDark(background) ? INK_LIGHT : INK_DARK;
+  return els.some((e) => e.type !== 'note' && e.color === from) ? els.map((e) => (e.type !== 'note' && e.color === from ? { ...e, color: to } : e)) : els;
+}
 
 export const NOTE_COLORS = ['#fff3a3', '#ffd6e0', '#cdeefd', '#d7f5c9'] as const;
 
