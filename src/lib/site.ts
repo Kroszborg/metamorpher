@@ -17,3 +17,11 @@ export const SITE_DESCRIPTION =
 
 export const AUTHOR = { name: 'Kroszborg', url: 'https://www.kroszborg.co/' };
 export const SOURCE_URL = 'https://github.com/Kroszborg/metamorpher';
+
+/** The link preview card (public/og.png, 1200×630), used by Open Graph and X. */
+export const OG_IMAGE = {
+  url: '/og.png',
+  width: 1200,
+  height: 630,
+  alt: `${SITE_NAME}: every file tool, nothing uploaded`,
+} as const;
