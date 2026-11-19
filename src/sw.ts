@@ -21,7 +21,8 @@ declare const self: ServiceWorkerGlobalScope;
  * route, cached at install time here, and served re-wrapped in a fresh
  * Response, which keeps the request URL.
  */
-const TURBOPACK_WORKER = /\/_next\/static\/chunks\/turbopack-worker-[^/]+\.js$/;
+// The folder between static/ and chunks/ depends on the host (Vercel adds `immutable/`), so allow any.
+const TURBOPACK_WORKER = /\/_next\/static\/(?:[^/]+\/)*chunks\/turbopack-worker-[^/]+\.js$/;
 const WORKER_CACHE = 'metamorpher-worker-bootstrap';
 
 const entryUrl = (e: PrecacheEntry | string) => (typeof e === 'string' ? e : e.url);
