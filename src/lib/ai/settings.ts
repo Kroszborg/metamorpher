@@ -6,7 +6,7 @@
  * except to the provider the key belongs to, never logged, never in URLs.
  */
 import { useSyncExternalStore } from 'react';
-import { PROVIDERS } from './providers';
+import { pickDefaultModel, PROVIDERS } from './providers';
 import type { ModelOption, ProviderId, ProviderTarget } from './types';
 
 export type ProviderSettings = {
@@ -29,6 +29,22 @@ const EMPTY: AiSettings = { defaultProvider: null, providers: {} };
 
 let cache: { raw: string | null; value: AiSettings } | null = null;
 
+/**
+ * Earlier versions preselected the first model a provider listed, which for
+ * some providers is a tiny special-purpose model. Where the saved model is
+ * still that first entry and a preferred one is listed, switch to it.
+ */
+function repick(value: AiSettings): AiSettings {
+  let providers = value.providers;
+  for (const id of Object.keys(providers) as ProviderId[]) {
+    const p = providers[id];
+    if (!p?.models?.length || !PROVIDERS[id]?.preferredModels || p.model !== p.models[0]?.id) continue;
+    const better = pickDefaultModel(id, p.models);
+    if (better && better !== p.model) providers = { ...providers, [id]: { ...p, model: better } };
+  }
+  return providers === value.providers ? value : { ...value, providers };
+}
+
 function read(): AiSettings {
   let raw: string | null = null;
   try {
@@ -49,8 +65,8 @@ function read(): AiSettings {
       value = EMPTY;
     }
   }
-  cache = { raw, value };
-  return value;
+  cache = { raw, value: repick(value) };
+  return cache.value;
 }
 
 function write(next: AiSettings): void {

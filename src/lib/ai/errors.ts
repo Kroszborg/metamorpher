@@ -15,11 +15,14 @@ export type AiErrorKind =
 export class AiError extends Error {
   readonly kind: AiErrorKind;
   readonly status?: number;
-  constructor(kind: AiErrorKind, message: string, status?: number) {
+  /** For a rate limit: how long the provider asked us to wait, when it said. */
+  readonly retryAfterMs?: number;
+  constructor(kind: AiErrorKind, message: string, status?: number, retryAfterMs?: number) {
     super(message);
     this.name = 'AiError';
     this.kind = kind;
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -32,6 +35,7 @@ export function redact(text: string, apiKey?: string): string {
 
 const CONTEXT = /context.?length|context window|too many tokens|prompt is too long|maximum context|exceeds the (maximum|max)|input token count|reduce the length|request too large|too long/i;
 const QUOTA = /quota|credit|billing|insufficient_quota|balance|payment|RESOURCE_EXHAUSTED.*(quota|billing)/i;
+const RATE = /rate.?limit|try again in|per minute|per day|[TR]P[MD]|too many requests|overloaded/i;
 const AUTH = /api key not valid|invalid api key|invalid x-api-key|incorrect api key|unauthenticated|API_KEY_INVALID/i;
 const MODEL = /model.*(not found|does not exist|not available|not supported|decommissioned|invalid)|unknown model|no such model|model_not_found/i;
 
@@ -41,6 +45,25 @@ export function classifyHttpError(provider: string, status: number, raw: string,
   const said = detail ? ` The provider said: “${detail}”` : '';
   if (status === 401 || (status === 403 && !QUOTA.test(detail)) || (status === 400 && AUTH.test(detail))) {
     return new AiError('auth', `${provider} rejected the API key. Check that it is correct and still active.${said}`, status);
+  }
+  // A rate-limit message often links to the billing page; it is still a rate limit, not an empty account.
+  if ((status === 429 || status === 529) && RATE.test(detail)) {
+    const size = /Limit (\d+)[^]*?Requested (\d+)/i.exec(detail);
+    if (size && Number(size[2]) > Number(size[1])) {
+      return new AiError(
+        'context',
+        `This request is larger than ${provider} allows for this model on your plan (${size[2]} tokens asked, ${size[1]} allowed per minute). Pick a model with a higher limit in AI settings.${said}`,
+        status,
+      );
+    }
+    const wait = /try again in (?:(\d+)m)?\s*([\d.]+)(ms|s)/i.exec(detail);
+    const ms = wait ? Number(wait[1] ?? 0) * 60_000 + Number(wait[2]) * (wait[3] === 'ms' ? 1 : 1000) : undefined;
+    return new AiError(
+      'rate',
+      `${provider} is limiting how fast this key can be used${ms ? `; it asks to wait ${Math.ceil(ms / 1000)} seconds` : ''}. Try again shortly, or pick a model with a higher limit in AI settings.${said}`,
+      status,
+      ms,
+    );
   }
   if (status === 402 || QUOTA.test(detail)) {
     return new AiError('quota', `${provider} says the account is out of credit or quota. Check billing on the provider's site.${said}`, status);

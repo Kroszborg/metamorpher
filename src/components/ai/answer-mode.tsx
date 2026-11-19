@@ -92,7 +92,25 @@ export async function answerWith(
 ): Promise<string> {
   if (a.mode === 'cloud') {
     if (!a.cloud) throw new AiError('auth', 'Add an API key in AI settings first.');
-    const r = await streamChat(a.cloud, messages, { signal, onText, maxTokens: maxTokens ?? 4096 });
+    // A per-minute rate limit says how long to wait; wait it out (twice at most) instead of failing the answer.
+    let r: Awaited<ReturnType<typeof streamChat>> | undefined;
+    for (let attempt = 0; !r; attempt++) {
+      try {
+        r = await streamChat(a.cloud, messages, { signal, onText, maxTokens: maxTokens ?? 4096 });
+      } catch (err) {
+        const wait = err instanceof AiError && err.kind === 'rate' ? err.retryAfterMs : undefined;
+        if (wait === undefined || wait > 60_000 || attempt >= 2) throw err;
+        onText?.('', `_Waiting ${Math.ceil(wait / 1000)} s for ${a.label}'s rate limit…_`);
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(resolve, wait + 500);
+          signal?.addEventListener('abort', () => {
+            clearTimeout(t);
+            reject(new DOMException('Aborted', 'AbortError'));
+          });
+        });
+        onText?.('', '');
+      }
+    }
     if (r.stopReason === 'length') return `${r.text}\n\n_(The answer was cut off at the length limit.)_`;
     return r.text;
   }

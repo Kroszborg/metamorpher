@@ -15,7 +15,7 @@ import { SectionCard } from '@/components/kit/section-card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AiError } from '@/lib/ai/errors';
-import { hostOf, listModels, PROVIDER_IDS, PROVIDERS } from '@/lib/ai/providers';
+import { hostOf, listModels, pickDefaultModel, PROVIDER_IDS, PROVIDERS } from '@/lib/ai/providers';
 import {
   clearAiSettings,
   isConfigured,
@@ -113,7 +113,7 @@ function ProviderCard({ id, isDefault }: { id: ProviderId; isDefault: boolean })
     setTest({ state: 'busy' });
     try {
       const list = await listModels({ provider: id, apiKey: keyDraft.trim(), baseUrl: baseDraft.trim() || undefined });
-      const keep = list.some((m) => m.id === modelValue) ? modelValue : modelValue || list[0]?.id || '';
+      const keep = list.some((m) => m.id === modelValue) ? modelValue : modelValue || pickDefaultModel(id, list);
       updateProvider(id, {
         apiKey: keyDraft.trim(),
         models: list.slice(0, 500),
