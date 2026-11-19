@@ -11,6 +11,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { AnswerModePanel, answerWith, useAnswerer } from '@/components/ai/answer-mode';
+import { AnswerText } from '@/components/ai/answer-text';
 import { ModelGate } from '@/components/ai/model-gate';
 import { useLocalModel } from '@/components/ai/use-local-model';
 import { SectionCard } from '@/components/kit/section-card';
@@ -473,15 +474,15 @@ export default function ChatWithPdf({ tool }: ToolProps) {
                         Thinking…
                       </span>
                     ) : null}
-                    <div className="whitespace-pre-wrap" data-answer>
-                      {splitCitations(t.answer, t.sources).map((seg, i) =>
-                        typeof seg === 'string' ? (
-                          <span key={i}>{seg}</span>
-                        ) : (
-                          <span key={i}>{seg.map((c) => chip(c.hit, `${i}-${c.n}`))}</span>
-                        ),
-                      )}
-                    </div>
+                    <AnswerText
+                      data-answer=""
+                      text={t.answer}
+                      split={(text, key) =>
+                        splitCitations(text, t.sources).map((seg, i) =>
+                          typeof seg === 'string' ? seg : <span key={`${key}-${i}`}>{seg.map((c) => chip(c.hit, `${key}-${i}-${c.n}`))}</span>,
+                        )
+                      }
+                    />
                     {t.status === 'error' ? (
                       <p role="alert" className="mt-1 text-destructive" data-answer-error>
                         {t.error}

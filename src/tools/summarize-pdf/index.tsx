@@ -5,6 +5,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { AnswerText } from '@/components/ai/answer-text';
 import { AnswerModePanel, answerWith, useAnswerer } from '@/components/ai/answer-mode';
 import { SectionCard } from '@/components/kit/section-card';
 import { Segmented } from '@/components/kit/segmented';
@@ -254,9 +255,13 @@ export default function SummarizePdf({ tool }: ToolProps) {
                 ) : null
               }
             >
-              <div data-summary={summary.done ? 'done' : 'running'} className="whitespace-pre-wrap text-sm/relaxed">
-                {summary.text || <span className="text-muted-foreground">Waiting for the model…</span>}
-              </div>
+              {summary.text ? (
+                <AnswerText data-summary={summary.done ? 'done' : 'running'} className="text-sm/relaxed" text={summary.text} />
+              ) : (
+                <div data-summary="running" className="text-sm/relaxed text-muted-foreground">
+                  Waiting for the model…
+                </div>
+              )}
             </SectionCard>
           ) : null}
           {error ? (
