@@ -40,6 +40,8 @@ export type ProviderInfo = {
   defaultModel: string;
   /** Offered before (or instead of) a fetched list. */
   suggestedModels: readonly string[];
+  /** When there is no default: the first fetched model matching one of these, in order, is preselected. */
+  preferredModels?: readonly RegExp[];
   /** Whether this provider has a speech-to-text endpoint the transcribe tool can use. */
   transcription?: { model: string; url: string };
   note?: string;
@@ -86,6 +88,8 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyPlaceholder: 'gsk_…',
     defaultModel: '',
     suggestedModels: [],
+    // Groq's list changes often and starts with small special-purpose models, so prefer a general chat model.
+    preferredModels: [/llama-3\.3-70b-versatile/, /llama.*70b/, /gpt-oss-120b/, /llama.*versatile/, /llama/],
     transcription: { model: 'whisper-large-v3-turbo', url: 'https://api.groq.com/openai/v1/audio/transcriptions' },
   },
   openrouter: {
@@ -216,6 +220,9 @@ export function buildChatRequest(target: ProviderTarget, messages: readonly Chat
             model: target.model,
             stream: true,
             max_tokens: maxTokens,
+            // Document answers should be steady, and small models loop without a repetition penalty.
+            temperature: 0.2,
+            frequency_penalty: 0.4,
             messages: messages.map((m) => ({ role: m.role, content: m.content })),
           }),
         },
@@ -411,6 +418,18 @@ export function buildModelsRequest(target: Pick<ProviderTarget, 'provider' | 'ap
 }
 
 /** Fetches the models this key can use. Also the "test key" call: it fails on a bad key. */
+/** Models that answer with something other than chat text: never preselect them. */
+const NOT_CHAT = /whisper|tts|guard|embed|moderation|rerank|playai|orpheus|speech/i;
+
+/** The model to preselect from a fetched list when the user has not chosen one. */
+export function pickDefaultModel(provider: ProviderId, list: readonly { id: string }[]): string {
+  for (const want of PROVIDERS[provider].preferredModels ?? []) {
+    const hit = list.find((m) => want.test(m.id) && !NOT_CHAT.test(m.id));
+    if (hit) return hit.id;
+  }
+  return (list.find((m) => !NOT_CHAT.test(m.id)) ?? list[0])?.id ?? '';
+}
+
 export async function listModels(
   target: Pick<ProviderTarget, 'provider' | 'apiKey' | 'baseUrl'>,
   signal?: AbortSignal,

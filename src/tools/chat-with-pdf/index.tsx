@@ -33,6 +33,7 @@ import {
   search,
   splitCitations,
 } from '@/lib/ai/rag';
+import { AiError } from '@/lib/ai/errors';
 import type { ChatMessage } from '@/lib/ai/types';
 import { baseName, downloadBlob, newId } from '@/lib/files';
 import { cn } from '@/lib/utils';
@@ -206,7 +207,7 @@ export default function ChatWithPdf({ tool }: ToolProps) {
     let hits = search(idx, q, 12, qvec);
     // Nothing matched ("summarise this"): start from the beginning of the documents.
     if (hits.length === 0) hits = index.passages.slice(0, 12).map((passage) => ({ passage, score: 0 }));
-    const { text: excerpts, used } = formatExcerpts(hits, answerer.budget);
+    let { text: excerpts, used } = formatExcerpts(hits, answerer.budget);
     const sources = sourcesOf(used);
     const via = answerer.label;
     const id = newId('t');
@@ -218,13 +219,16 @@ export default function ChatWithPdf({ tool }: ToolProps) {
       if (doc) setPreview({ docId: doc.id, page: sources[0].page });
     }
 
-    const messages: ChatMessage[] = [
+    // Earlier answers are context, not content: keep them short so they cannot crowd out the excerpts.
+    const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max)}…` : s);
+    const build = (history: Turn[], text: string): ChatMessage[] => [
       { role: 'system', content: ANSWER_SYSTEM_PROMPT },
-      ...prior.flatMap((t): ChatMessage[] => [
-        { role: 'user', content: t.question },
-        { role: 'assistant', content: t.answer },
+      ...history.flatMap((t): ChatMessage[] => [
+        { role: 'user', content: clip(t.question, 600) },
+        { role: 'assistant', content: clip(t.answer, 1200) },
       ]),
-      { role: 'user', content: `Excerpts:\n\n${excerpts}\n\nQuestion: ${q}` },
+      // A pasted page of text is not a question the excerpts can hold: keep the first part of it.
+      { role: 'user', content: `Excerpts:\n\n${text}\n\nQuestion: ${clip(q, 4000)}` },
     ];
     const update = (patch: Partial<Turn>) =>
       setTurns((all) => {
@@ -233,11 +237,32 @@ export default function ChatWithPdf({ tool }: ToolProps) {
         return next;
       });
     try {
-      const answer = await answerWith(answerer, messages, {
-        signal: controller.signal,
-        onText: (_d, full) => update({ answer: full }),
-        maxTokens: answerer.mode === 'cloud' ? 2048 : 400,
-      });
+      // A model with a small context window (or a small tokens-per-minute allowance)
+      // rejects the full request: retry without history, then with fewer excerpts
+      // and a shorter answer, before giving up.
+      const full = answerer.mode === 'cloud' ? 1500 : 400;
+      const plans = [
+        { history: prior, budget: answerer.budget, maxTokens: full },
+        { history: [] as Turn[], budget: Math.round(answerer.budget / 2), maxTokens: Math.min(full, 900) },
+        { history: [] as Turn[], budget: Math.round(answerer.budget / 5), maxTokens: Math.min(full, 500) },
+      ];
+      let answer = '';
+      for (const [i, plan] of plans.entries()) {
+        if (i > 0) {
+          ({ text: excerpts, used } = formatExcerpts(hits, plan.budget));
+          update({ answer: '', sources: sourcesOf(used) });
+        }
+        try {
+          answer = await answerWith(answerer, build(plan.history, excerpts), {
+            signal: controller.signal,
+            onText: (_d, text) => update({ answer: text }),
+            maxTokens: plan.maxTokens,
+          });
+          break;
+        } catch (err) {
+          if (!(err instanceof AiError && err.kind === 'context') || i === plans.length - 1) throw err;
+        }
+      }
       update({ answer, status: 'done' });
     } catch (err) {
       if (isAbortError(err)) update({ status: 'done', answer: '' });
@@ -464,7 +489,10 @@ export default function ChatWithPdf({ tool }: ToolProps) {
                     ) : null}
                     {t.sources.length > 0 ? (
                       <div className="mt-2 flex flex-wrap items-center gap-y-1 border-t pt-2 text-[0.7rem] text-muted-foreground" data-sources>
-                        Sources:{t.sources.map((s) => chip(s, `src-${s.n}`))}
+                        Sources:
+                        {t.sources
+                          .filter((s, i, all) => all.findIndex((o) => o.docName === s.docName && o.page === s.page) === i)
+                          .map((s) => chip(s, `src-${s.n}`))}
                       </div>
                     ) : null}
                     <p className="mt-1 text-[0.65rem] text-faint">{t.via}</p>
